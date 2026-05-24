@@ -1,4 +1,11 @@
 node_modules/
 web/dist/
+dist/
 .DS_Store
 *.log
+.agents/
+
+# Beads / Dolt files (added by bd init)
+.dolt/
+*.db
+.beads-credential-key
