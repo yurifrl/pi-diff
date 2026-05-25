@@ -1,0 +1,18 @@
+{
+  "compilerOptions": {
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "target": "ES2022",
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "declaration": false,
+    "outDir": "dist",
+    "rootDir": ".",
+    "resolveJsonModule": true,
+    "jsx": "react-jsx",
+    "jsxImportSource": "react"
+  },
+  "include": ["core/**/*.ts", "cli.ts", "index.ts", "pi-target-selector.ts", "cli/**/*.tsx", "cli/**/*.ts"],
+  "exclude": ["node_modules", "tests", "web", "dist", "scripts", "cli/assets.ts"]
+}
