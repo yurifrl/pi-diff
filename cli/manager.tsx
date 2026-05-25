@@ -526,86 +526,93 @@ export function Manager(props: ManagerProps): React.JSX.Element {
 
 	const ACCENT = "cyan";
 	const activeItem = items[safeCursor];
-	const RULE = "\u2500".repeat(72);
+
+	const kindStyle = (c: DiffComment): { label: string; color: string } => {
+		if (c.kind === "line") return { label: "LINE", color: "cyan" };
+		if (c.kind === "file") return { label: "FILE", color: "yellow" };
+		return { label: "ALL ", color: "magenta" };
+	};
 
 	return (
-		<Box flexDirection="column" paddingX={1}>
+		<Box flexDirection="column">
 			{/* Header */}
-			<Box>
+			<Box borderStyle="round" borderColor={ACCENT} paddingX={2}>
 				<Text bold color={ACCENT}>pi-diff</Text>
-				<Text dimColor>  ·  {items.length} comment{items.length === 1 ? "" : "s"}  ·  output </Text>
-				<Text>{settings.output}</Text>
+				<Text dimColor>  ·  </Text>
+				<Text bold>{items.length}</Text>
+				<Text dimColor> comment{items.length === 1 ? "" : "s"}  ·  output </Text>
+				<Text bold color="yellow">{settings.output}</Text>
 			</Box>
-			<Box><Text dimColor>{RULE}</Text></Box>
 
-			{/* Comments list */}
-			<Box marginTop={1}><Text dimColor>COMMENTS</Text></Box>
-			{items.length === 0 ? (
-				<Box><Text dimColor>(empty — press q to exit)</Text></Box>
-			) : (
-				items.map((it, i) => {
-					const active = i === safeCursor;
-					const kind = kindLabel(it.comment);
-					const loc = locationFor(it.comment);
-					const dotColor = it.lastError ? "red" : active ? ACCENT : "gray";
-					return (
-						<Box key={it.comment.id}>
-							<Box width={2}><Text color={dotColor}>{it.lastError ? "○" : "●"}</Text></Box>
-							<Box width={3}><Text dimColor>{String(i + 1)}</Text></Box>
-							<Box width={5}><Text dimColor>{kind}</Text></Box>
-							<Box flexGrow={1}><Text bold={active} color={active ? ACCENT : undefined} dimColor={!active}>{loc}</Text></Box>
-						</Box>
-					);
-				})
-			)}
-			<Box marginTop={1}><Text dimColor>{RULE}</Text></Box>
-
-			{/* Detail */}
-			<Box marginTop={1}><Text dimColor>DETAIL</Text></Box>
-			{activeItem ? (
-				<Box flexDirection="column">
-					<Box>
-						<Box width={10}><Text dimColor>location</Text></Box>
-						<Text>{locationFor(activeItem.comment)}</Text>
-					</Box>
-					<Box>
-						<Box width={10}><Text dimColor>kind</Text></Box>
-						<Text>{activeItem.comment.kind}{activeItem.comment.kind === "line" ? ` (${(activeItem.comment as { side: string }).side})` : ""}</Text>
-					</Box>
-					{(settings.output === "beads" || settings.output === "beads-script") ? (
-						<>
-							<Box>
-								<Box width={10}><Text dimColor>title</Text></Box>
-								<Text>{activeItem.overrides.title || buildTitle(activeItem.comment)}</Text>
-							</Box>
-							<Box>
-								<Box width={10}><Text dimColor>labels</Text></Box>
-								<Text>{(activeItem.overrides.labels ?? settings.beadsLabels).join(",") || "(none)"}</Text>
-							</Box>
-						</>
-					) : null}
-					<Box marginTop={1} flexDirection="column">
-						<Text dimColor>comment</Text>
-						{activeItem.comment.text.split(/\r?\n/).slice(0, 6).map((line, idx) => (
-							<Text key={idx}>  {line || " "}</Text>
-						))}
-						{activeItem.comment.text.split(/\r?\n/).length > 6 ? (
-							<Text dimColor>  … ({activeItem.comment.text.split(/\r?\n/).length - 6} more line(s))</Text>
-						) : null}
-					</Box>
-					{activeItem.lastError ? (
-						<Box marginTop={1}>
-							<Text color="red">! {activeItem.lastError}</Text>
-						</Box>
-					) : null}
+			{/* Two-column body */}
+			<Box>
+				{/* Comments list */}
+				<Box borderStyle="round" borderColor="gray" flexDirection="column" paddingX={1} width={44}>
+					<Box paddingX={1}><Text dimColor>COMMENTS</Text></Box>
+					<Box height={1} />
+					{items.length === 0 ? (
+						<Box paddingX={1}><Text dimColor>(empty — press q to exit)</Text></Box>
+					) : (
+						items.map((it, i) => {
+							const active = i === safeCursor;
+							const kind = kindStyle(it.comment);
+							const loc = locationFor(it.comment);
+							return (
+								<Box key={it.comment.id} paddingX={1}>
+									<Box width={2}><Text color={active ? ACCENT : "gray"}>{active ? "❯" : " "}</Text></Box>
+									<Box width={3}><Text dimColor>{String(i + 1)}</Text></Box>
+									<Box width={6}>
+										<Text bold color={kind.color}>{kind.label}</Text>
+									</Box>
+									<Box flexGrow={1}>
+										<Text bold={active} dimColor={!active}>{loc}</Text>
+									</Box>
+									{it.lastError ? <Text color="red">  !</Text> : null}
+								</Box>
+							);
+						})
+					)}
 				</Box>
-			) : (
-				<Text dimColor>nothing to show</Text>
-			)}
-			<Box marginTop={1}><Text dimColor>{RULE}</Text></Box>
+
+				{/* Detail */}
+				<Box borderStyle="round" borderColor="gray" flexDirection="column" paddingX={2} flexGrow={1} marginLeft={1}>
+					<Box><Text dimColor>DETAIL</Text></Box>
+					<Box height={1} />
+					{activeItem ? (
+						<>
+							<DetailRow label="location" value={locationFor(activeItem.comment)} />
+							<DetailRow
+								label="kind"
+								value={`${activeItem.comment.kind}${activeItem.comment.kind === "line" ? ` (${(activeItem.comment as { side: string }).side})` : ""}`}
+							/>
+							{(settings.output === "beads" || settings.output === "beads-script") ? (
+								<>
+									<DetailRow label="title" value={activeItem.overrides.title || buildTitle(activeItem.comment)} />
+									<DetailRow label="labels" value={(activeItem.overrides.labels ?? settings.beadsLabels).join(",") || "(none)"} />
+								</>
+							) : null}
+							<Box height={1} />
+							<Text color="yellow">comment</Text>
+							{activeItem.comment.text.split(/\r?\n/).slice(0, 6).map((line, idx) => (
+								<Text key={idx}>  {line || " "}</Text>
+							))}
+							{activeItem.comment.text.split(/\r?\n/).length > 6 ? (
+								<Text dimColor>  … ({activeItem.comment.text.split(/\r?\n/).length - 6} more)</Text>
+							) : null}
+							{activeItem.lastError ? (
+								<Box marginTop={1}>
+									<Text color="red">! {activeItem.lastError}</Text>
+								</Box>
+							) : null}
+						</>
+					) : (
+						<Text dimColor>nothing to show</Text>
+					)}
+				</Box>
+			</Box>
 
 			{/* Footer */}
-			<Box marginTop={0}>
+			<Box paddingX={2}>
 				{mode.kind === "results" ? (
 					<Box flexDirection="column">
 						<Text bold>submission results</Text>
@@ -624,11 +631,41 @@ export function Manager(props: ManagerProps): React.JSX.Element {
 					<Text>discard <Text bold>{items.length}</Text> item(s)? [<Text bold color={ACCENT}>y</Text>/N]</Text>
 				) : (
 					<Box flexDirection="column">
-						<Text dimColor>↑↓ nav  ·  e edit  ·  d delete  ·  s submit  ·  c clear  ·  q quit</Text>
+						<Box>
+							<Hotkey k="↑↓" label="nav" />
+							<Text>   </Text>
+							<Hotkey k="e" label="edit" color="yellow" />
+							<Text>   </Text>
+							<Hotkey k="d" label="delete" color="red" />
+							<Text>   </Text>
+							<Hotkey k="s" label="submit" color="green" />
+							<Text>   </Text>
+							<Hotkey k="c" label="clear" color="magenta" />
+							<Text>   </Text>
+							<Hotkey k="q" label="quit" />
+						</Box>
 						{error ? <Text color="red">{error}</Text> : null}
 					</Box>
 				)}
 			</Box>
 		</Box>
+	);
+}
+
+function DetailRow({ label, value }: { label: string; value: string }): React.JSX.Element {
+	return (
+		<Box>
+			<Box width={10}><Text color="yellow">{label}</Text></Box>
+			<Text>{value}</Text>
+		</Box>
+	);
+}
+
+function Hotkey({ k, label, color = "cyan" }: { k: string; label: string; color?: string }): React.JSX.Element {
+	return (
+		<Text>
+			<Text bold color={color}>{k}</Text>
+			<Text dimColor> {label}</Text>
+		</Text>
 	);
 }

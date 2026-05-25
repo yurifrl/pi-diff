@@ -10,48 +10,43 @@ type Props = {
 };
 
 const ACCENT = "cyan";
-const RULE = "\u2500".repeat(72);
 
-export function Waiting({ targetLabel, viewerMessage, url, count, autoSubmit }: Props): React.JSX.Element {
+export function Waiting({ targetLabel: _t, viewerMessage: _v, url, count, autoSubmit }: Props): React.JSX.Element {
 	return (
-		<Box flexDirection="column" paddingX={1}>
-			<Box>
-				<Text bold color={ACCENT}>pi-diff</Text>
-				<Text dimColor>  ·  waiting for review</Text>
+		<Box flexDirection="column">
+			<Box borderStyle="round" borderColor={ACCENT} flexDirection="column" paddingX={2} paddingY={1}>
+				<Box marginBottom={1}>
+					<Text bold color={ACCENT}>pi-diff</Text>
+					<Text dimColor>  ·  waiting for review</Text>
+				</Box>
+
+				<Box marginBottom={1}>
+					<Text color={count > 0 ? "green" : "gray"}>●</Text>
+					<Text>  </Text>
+					<Text bold>{count}</Text>
+					<Text dimColor> comment{count === 1 ? "" : "s"} received</Text>
+				</Box>
+
+				<Box>
+					<Box width={6}><Text color="yellow">url</Text></Box>
+					<Text>{url}</Text>
+				</Box>
 			</Box>
-			<Box><Text dimColor>{RULE}</Text></Box>
 
-			<Box marginTop={1}><Field label="TARGET" value={targetLabel} /></Box>
-			<Field label="VIEWER" value={viewerMessage} />
-			<Field label="URL" value={url} />
-
-			<Box marginTop={1}>
-				<Box width={9}><Text color={count > 0 ? "green" : "gray"}>●</Text></Box>
-				<Text bold>{count}</Text>
-				<Text dimColor> comment{count === 1 ? "" : "s"} received</Text>
-			</Box>
-
-			<Box marginTop={1}><Text dimColor>{RULE}</Text></Box>
-			<Box marginTop={1}>
-				{autoSubmit ? (
-					<Text dimColor>auto-submit · first browser submission ends Phase A · ctrl-c cancels</Text>
-				) : count === 0 ? (
-					<Text dimColor>write comments in the browser, then click Done · ctrl-c cancels</Text>
-				) : (
-					<Text dimColor>
-						press <Text bold color={ACCENT}>↵</Text> when done · keep submitting more · ctrl-c cancels
-					</Text>
-				)}
+			<Box paddingX={2}>
+				<Hotkey k={autoSubmit ? "first ↵" : "↵"} label={autoSubmit ? "auto-submit on first send" : "done"} />
+				<Text>   </Text>
+				<Hotkey k="⌃c" label="cancel" color="red" />
 			</Box>
 		</Box>
 	);
 }
 
-function Field({ label, value }: { label: string; value: string }): React.JSX.Element {
+function Hotkey({ k, label, color = "cyan" }: { k: string; label: string; color?: string }): React.JSX.Element {
 	return (
-		<Box>
-			<Box width={9}><Text dimColor>{label}</Text></Box>
-			<Box flexGrow={1}><Text>{value}</Text></Box>
-		</Box>
+		<Text>
+			<Text bold color={color}>{k}</Text>
+			<Text dimColor> {label}</Text>
+		</Text>
 	);
 }
