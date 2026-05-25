@@ -1,9 +1,8 @@
 import { mkdir, readFile, readdir, rename, stat, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import path from "node:path";
-import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
-import type { CreatedBead } from "./bd-client";
-import type { DiffComment, ResolvedDiffTarget } from "./types";
+import type { CreatedBead } from "./bd-client.js";
+import type { DiffComment, ResolvedDiffTarget } from "./types.js";
 
 /**
  * Backup of every send attempt, written next to the pi session log.
@@ -11,8 +10,8 @@ import type { DiffComment, ResolvedDiffTarget } from "./types";
  * Layout: ~/.pi/agent/sessions/<slug>/<base>.pi-diff.json
  *   where <base> is the session log file name without ".jsonl".
  *
- * If no session file is available (ephemeral sessions, tests), we fall back
- * to ~/.pi/agent/sessions/_ephemeral/<ISO>_<rand>.pi-diff.json.
+ * If no session file is available (ephemeral sessions, tests, the CLI),
+ * we fall back to ~/.pi/agent/sessions/_ephemeral/<ISO>_<rand>.pi-diff.json.
  */
 
 export type BackupAttemptResult = {
@@ -38,8 +37,7 @@ export type BackupFile = {
 };
 
 /** Returns the absolute path of the backup file for the current session. */
-export function resolveBackupPath(ctx: ExtensionContext): string {
-	const sessionFile = ctx.sessionManager?.getSessionFile?.();
+export function resolveBackupPath(sessionFile: string | null): string {
 	if (sessionFile && sessionFile.endsWith(".jsonl")) {
 		return sessionFile.replace(/\.jsonl$/, ".pi-diff.json");
 	}
@@ -84,11 +82,10 @@ async function writeBackupRaw(filePath: string, data: BackupFile): Promise<void>
  * caller can later update the same attempt with a result.
  */
 export async function appendAttempt(
-	ctx: ExtensionContext,
+	sessionFile: string | null,
 	attempt: Omit<BackupAttempt, "savedAt" | "result"> & Partial<Pick<BackupAttempt, "savedAt" | "result">>,
 ): Promise<string> {
-	const filePath = resolveBackupPath(ctx);
-	const sessionFile = ctx.sessionManager?.getSessionFile?.() ?? null;
+	const filePath = resolveBackupPath(sessionFile);
 	const existing = await readBackupRaw(filePath);
 	const next: BackupFile = existing ?? {
 		session: { file: sessionFile, id: extractSessionId(sessionFile ?? undefined) },

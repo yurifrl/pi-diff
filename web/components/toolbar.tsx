@@ -86,8 +86,8 @@ export function Toolbar(props: ToolbarProps) {
 						Split
 					</button>
 				</div>
-				<button className="button--primary button-with-shortcut" disabled={props.expired || props.unsentCount === 0} onClick={props.onSendAll}>
-					<span>Send all{props.unsentCount > 0 ? ` (${props.unsentCount})` : ""}</span>
+				<button className="button--primary button-with-shortcut" disabled={props.expired} onClick={props.onSendAll}>
+					<span>Done{props.unsentCount > 0 ? ` (${props.unsentCount})` : ""}</span>
 					<span className="shortcut-chip">{sendAllHint}</span>
 				</button>
 			</div>

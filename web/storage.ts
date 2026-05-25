@@ -1,4 +1,4 @@
-import type { DiffComment, DiffViewMode } from "../types";
+import type { DiffComment, DiffViewMode } from "../core/types";
 
 export type StoredViewerState = {
 	sidebarCollapsed: boolean;

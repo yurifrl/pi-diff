@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
-import { appendCommentsToEditor, appendTextToEditor, findReusableDraftComment, formatCommentsForEditor, isDiffComment, isEmptyDraftComment, removeCommentById, updateCommentText, validateDiffComments } from "../comments";
-import type { DiffComment, ResolvedDiffTarget } from "../types";
+import { appendCommentsToEditor, appendTextToEditor, findReusableDraftComment, formatCommentsForEditor, isDiffComment, isEmptyDraftComment, removeCommentById, updateCommentText, validateDiffComments } from "../core/comments";
+import type { DiffComment, ResolvedDiffTarget } from "../core/types";
 
 const TARGET: ResolvedDiffTarget = {
 	type: "uncommitted",

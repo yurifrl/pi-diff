@@ -1,4 +1,4 @@
-import type { DiffFileEntry } from "../types";
+import type { DiffFileEntry } from "../core/types";
 
 function normalize(value: string): string {
 	return value.trim().toLowerCase();

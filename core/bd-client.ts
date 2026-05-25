@@ -1,7 +1,7 @@
 import { existsSync, statSync } from "node:fs";
 import path from "node:path";
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import type { DiffComment, DiffLineComment, ResolvedDiffTarget } from "./types";
+import type { Exec } from "./exec.js";
+import type { DiffComment, DiffLineComment, ResolvedDiffTarget } from "./types.js";
 
 export type BeadsCreateOptions = {
 	command: string; // e.g. "bd"
@@ -65,10 +65,11 @@ export function buildDescription(comment: DiffComment, target: ResolvedDiffTarge
 	return lines.join("\n");
 }
 
-function buildArgs(comment: DiffComment, options: BeadsCreateOptions): string[] {
+function buildArgs(comment: DiffComment, options: BeadsCreateOptions, titleOverrides?: Map<string, string>): string[] {
+	const overriddenTitle = titleOverrides?.get(comment.id);
 	const args = [
 		"create",
-		buildTitle(comment),
+		overriddenTitle && overriddenTitle.trim().length > 0 ? overriddenTitle : buildTitle(comment),
 		"--type", options.type,
 		"--stdin",
 		"--silent",
@@ -78,26 +79,8 @@ function buildArgs(comment: DiffComment, options: BeadsCreateOptions): string[] 
 	return args;
 }
 
-export type ExecLike = (
-	cmd: string,
-	args: string[],
-	opts: { cwd: string; timeout?: number; input?: string },
-) => Promise<{ stdout: string; stderr: string; code: number }>;
-
-/** Adapter so we can pass either pi.exec (no input support) or a custom exec for tests. */
-function makeExec(pi: ExtensionAPI): ExecLike {
-	return async (cmd, args, opts) => {
-		// pi.exec does not accept stdin; we shell out via `bash -c` and pipe.
-		// To stay resilient, we encode the description with base64 and decode on the fly.
-		if (opts.input !== undefined) {
-			const encoded = Buffer.from(opts.input, "utf8").toString("base64");
-			const argString = args.map((a) => `'${a.replace(/'/g, "'\\''")}'`).join(" ");
-			const script = `printf %s "${encoded}" | base64 -d | ${cmd} ${argString}`;
-			return await pi.exec("bash", ["-lc", script], { cwd: opts.cwd, timeout: opts.timeout ?? 10000 });
-		}
-		return await pi.exec(cmd, args, { cwd: opts.cwd, timeout: opts.timeout ?? 10000 });
-	};
-}
+/** Back-compat alias for tests. */
+export type ExecLike = Exec;
 
 /**
  * Check whether beads is initialized in the given repo. Beads stores its
@@ -113,9 +96,9 @@ export function isBeadsRepoConfigured(cwd: string): boolean {
 	}
 }
 
-export async function isBeadsAvailable(pi: ExtensionAPI, command: string, cwd: string): Promise<boolean> {
+export async function isBeadsAvailable(exec: Exec, command: string, cwd: string): Promise<boolean> {
 	try {
-		const result = await pi.exec(command, ["--version"], { cwd, timeout: 3000 });
+		const result = await exec(command, ["--version"], { cwd, timeout: 3000 });
 		return result.code === 0;
 	} catch {
 		return false;
@@ -123,16 +106,18 @@ export async function isBeadsAvailable(pi: ExtensionAPI, command: string, cwd: s
 }
 
 export async function createBead(
-	exec: ExecLike,
+	exec: Exec,
 	comment: DiffComment,
 	target: ResolvedDiffTarget,
 	options: BeadsCreateOptions,
+	titleOverrides?: Map<string, string>,
 ): Promise<CreatedBead> {
-	const title = buildTitle(comment);
-	const args = buildArgs(comment, options);
+	const overriddenTitle = titleOverrides?.get(comment.id);
+	const title = overriddenTitle && overriddenTitle.trim().length > 0 ? overriddenTitle : buildTitle(comment);
+	const args = buildArgs(comment, options, titleOverrides);
 	const description = buildDescription(comment, target);
 	try {
-		const result = await exec(options.command, args, { cwd: options.cwd, input: description });
+		const result = await exec(options.command, args, { cwd: options.cwd, input: description, timeout: 10000 });
 		if (result.code !== 0) {
 			return { commentId: comment.id, id: null, title, error: result.stderr.trim() || `exit ${result.code}` };
 		}
@@ -144,17 +129,16 @@ export async function createBead(
 }
 
 export async function createBeadsForComments(
-	pi: ExtensionAPI,
+	exec: Exec,
 	comments: DiffComment[],
 	target: ResolvedDiffTarget,
 	options: BeadsCreateOptions,
-	execOverride?: ExecLike,
+	titleOverrides?: Map<string, string>,
 ): Promise<CreatedBead[]> {
-	const exec = execOverride ?? makeExec(pi);
 	const meaningful = comments.filter((c) => c.text.trim().length > 0);
 	const out: CreatedBead[] = [];
 	for (const comment of meaningful) {
-		out.push(await createBead(exec, comment, target, options));
+		out.push(await createBead(exec, comment, target, options, titleOverrides));
 	}
 	return out;
 }

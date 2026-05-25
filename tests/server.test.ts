@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test } from "vitest";
-import { createDiffCmuxServer, type DiffCmuxServer } from "../server";
-import type { DiffComment } from "../types";
+import { createDiffCmuxServer, type DiffCmuxServer } from "../core/server";
+import type { DiffComment } from "../core/types";
 
 const bootstrap = {
 	repo: { root: "/tmp/project", name: "project", cwd: "/tmp/project" },

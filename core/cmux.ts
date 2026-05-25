@@ -1,13 +1,6 @@
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type { Exec, ExecResult } from "./exec.js";
 
 const CMUX_COMMAND_TIMEOUT_MS = 1500;
-
-type ExecResult = {
-	stdout: string;
-	stderr: string;
-	code: number;
-	killed?: boolean;
-};
 
 export type CmuxCallerContext = {
 	workspaceId: string;
@@ -109,20 +102,20 @@ export function buildNewSurfaceArgs(workspaceId: string, paneRef: string, url: s
 	return ["new-surface", "--type", "browser", "--workspace", workspaceId, "--pane", paneRef, "--url", url];
 }
 
-async function execCmux(pi: ExtensionAPI, args: string[], cwd: string): Promise<ExecResult> {
-	return await pi.exec("cmux", args, {
+async function execCmux(exec: Exec, args: string[], cwd: string): Promise<ExecResult> {
+	return await exec("cmux", args, {
 		cwd,
 		timeout: CMUX_COMMAND_TIMEOUT_MS,
 	});
 }
 
 export async function resolveCmuxCallerContext(
-	pi: ExtensionAPI,
+	exec: Exec,
 	cwd: string,
 	env: Record<string, string | undefined> = process.env,
 ): Promise<CmuxCallerContext | null> {
 	try {
-		const result = await execCmux(pi, ["identify"], cwd);
+		const result = await execCmux(exec, ["identify"], cwd);
 		if (result.code !== 0) {
 			return null;
 		}
@@ -132,16 +125,16 @@ export async function resolveCmuxCallerContext(
 	}
 }
 
-export async function openCmuxPane(pi: ExtensionAPI, cwd: string, workspaceId: string, url: string): Promise<ExecResult> {
-	return await execCmux(pi, buildNewPaneArgs(workspaceId, url), cwd);
+export async function openCmuxPane(exec: Exec, cwd: string, workspaceId: string, url: string): Promise<ExecResult> {
+	return await execCmux(exec, buildNewPaneArgs(workspaceId, url), cwd);
 }
 
 export async function openCmuxSurface(
-	pi: ExtensionAPI,
+	exec: Exec,
 	cwd: string,
 	workspaceId: string,
 	paneRef: string,
 	url: string,
 ): Promise<ExecResult> {
-	return await execCmux(pi, buildNewSurfaceArgs(workspaceId, paneRef, url), cwd);
+	return await execCmux(exec, buildNewSurfaceArgs(workspaceId, paneRef, url), cwd);
 }

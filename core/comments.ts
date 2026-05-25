@@ -1,4 +1,4 @@
-import type { DiffComment, DiffLineComment, ResolvedDiffTarget } from "./types";
+import type { DiffComment, DiffLineComment, ResolvedDiffTarget } from "./types.js";
 
 function isRecord(value: unknown): value is Record<string, unknown> {
 	return typeof value === "object" && value !== null;
@@ -117,7 +117,7 @@ export function findReusableDraftComment(
 		if (target.kind === "overall") {
 			return comment;
 		}
-		if (comment.fileId !== target.fileId) {
+		if (comment.kind === "overall" || comment.fileId !== target.fileId) {
 			continue;
 		}
 		if (target.kind === "line") {

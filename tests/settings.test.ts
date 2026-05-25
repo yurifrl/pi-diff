@@ -7,7 +7,7 @@ let dir: string;
 let originalHome: string | undefined;
 
 async function importSettings() {
-	return await import("../settings");
+	return await import("../core/settings");
 }
 
 beforeEach(async () => {

@@ -1,17 +1,14 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import {
-	appendAttempt,
 	formatBackupSummary,
 	listBackupFiles,
 	readBackup,
-	summarizeBeadsResult,
-	updateLastResult,
-} from "./backups";
-import { createBeadsForComments, isBeadsAvailable, isBeadsRepoConfigured, summarizeCreated } from "./bd-client";
-import { formatCommentsAsBeadsScript } from "./beads";
-import { appendTextToEditor, formatCommentsForEditor, hasMeaningfulText } from "./comments";
-import { buildDiffViewerData, isGitRepository } from "./git";
-import { createDiffServer, type DiffServer } from "./server";
+} from "./core/backups.js";
+import { isBeadsRepoConfigured } from "./core/bd-client.js";
+import type { Exec } from "./core/exec.js";
+import { buildDiffViewerData, isGitRepository } from "./core/git.js";
+import { handleSendComments, isBeadsOutputMode } from "./core/handle-send.js";
+import { createDiffServer, type DiffServer } from "./core/server.js";
 import {
 	type DiffSettings,
 	type SettingsLocation,
@@ -19,114 +16,45 @@ import {
 	describeSettings,
 	loadSettings,
 	saveSettings,
-} from "./settings";
-import { resolveDiffTargetFromArgs } from "./target-selector";
-import type { DiffComment, SendCommentsResponse } from "./types";
-import { openViewer } from "./viewer";
+} from "./core/settings.js";
+import type { DiffComment, SendCommentsResponse } from "./core/types.js";
+import { openViewer } from "./core/viewer.js";
+import { resolveDiffTargetFromArgs } from "./pi-target-selector.js";
 
 const DIFF_COMMAND = "diff";
 const SETTINGS_COMMAND = "diff-settings";
 const BACKUPS_COMMAND = "diff-backups";
 
+/**
+ * Adapter from pi.exec (which has no stdin support) to the runtime-agnostic
+ * Exec interface used by core/. When `input` is provided, we shell out via
+ * bash and feed stdin through a base64 pipe so binaries like `bd` can read
+ * the description from stdin.
+ */
+function makeExec(pi: ExtensionAPI): Exec {
+	return async (cmd, args, opts) => {
+		if (opts?.input !== undefined) {
+			const encoded = Buffer.from(opts.input, "utf8").toString("base64");
+			const argString = args.map((a) => `'${a.replace(/'/g, "'\\''")}'`).join(" ");
+			const script = `printf %s "${encoded}" | base64 -d | ${cmd} ${argString}`;
+			return await pi.exec("bash", ["-lc", script], { cwd: opts.cwd, timeout: opts.timeout ?? 10000 });
+		}
+		return await pi.exec(cmd, args, opts);
+	};
+}
+
 function notify(ctx: ExtensionContext, message: string, level: "info" | "error" | "success" = "info") {
-	if (ctx.hasUI) ctx.ui.notify(message, level);
+	if (!ctx.hasUI) return;
+	// pi.notify only knows info | warning | error; map "success" → "info".
+	const piLevel: "info" | "warning" | "error" = level === "success" ? "info" : level;
+	ctx.ui.notify(message, piLevel);
 }
 
-function isBeadsOutputMode(output: DiffSettings["output"]): boolean {
-	return output === "beads" || output === "beads-script";
-}
+// ---------------------------------------------------------------------------
+// Commands.
+// ---------------------------------------------------------------------------
 
-async function handleSendComments(
-	pi: ExtensionAPI,
-	ctx: ExtensionContext,
-	settings: DiffSettings,
-	target: import("./types").ResolvedDiffTarget,
-	comments: DiffComment[],
-): Promise<SendCommentsResponse> {
-	const beadsOpts = {
-		command: settings.beadsCommand,
-		type: settings.beadsType,
-		labels: settings.beadsLabels,
-		priority: settings.beadsPriority,
-	};
-
-	// Backup BEFORE any output dispatch. If the backup itself fails we still
-	// proceed with the send (don't block the user); we just log a warning so
-	// failures here don't go silent.
-	let backupPath: string | null = null;
-	try {
-		backupPath = await appendAttempt(ctx, {
-			output: settings.output,
-			target,
-			cwd: ctx.cwd,
-			comments,
-		});
-	} catch (err) {
-		console.warn("[pi-diff] failed to write backup file:", err);
-	}
-
-	const finalize = async (result: Parameters<typeof updateLastResult>[1]) => {
-		if (!backupPath) return;
-		try {
-			await updateLastResult(backupPath, result);
-		} catch (err) {
-			console.warn("[pi-diff] failed to update backup result:", err);
-		}
-	};
-
-	if (isBeadsOutputMode(settings.output) && !isBeadsRepoConfigured(ctx.cwd)) {
-		const message = `Beads is enabled but \`.beads/\` is not initialized in this repo. Run \`${settings.beadsCommand} init\` or disable beads in the diff viewer.`;
-		notify(ctx, message, "error");
-		await finalize({ ok: false, note: message });
-		throw new Error(message);
-	}
-
-	if (settings.output === "beads") {
-		const available = await isBeadsAvailable(pi, settings.beadsCommand, ctx.cwd);
-		if (!available) {
-			notify(
-				ctx,
-				`\`${settings.beadsCommand}\` not found. Install beads or set output: "beads-script" in settings.`,
-				"error",
-			);
-			const script = formatCommentsAsBeadsScript(target, comments, beadsOpts);
-			await finalize({ ok: false, note: "beads command not found; emitted script" });
-			return { sentAt: Date.now(), formattedText: script };
-		}
-		const results = await createBeadsForComments(pi, comments, target, { ...beadsOpts, cwd: ctx.cwd });
-		const summary = summarizeCreated(results);
-		if (ctx.hasUI) {
-			const editor = ctx.ui.getEditorText();
-			const next = appendTextToEditor(editor, `${summary}\n`);
-			await ctx.ui.setEditorText(next);
-		}
-		await finalize(summarizeBeadsResult(results));
-		return { sentAt: Date.now(), formattedText: summary };
-	}
-
-	if (settings.output === "beads-script") {
-		const script = formatCommentsAsBeadsScript(target, comments, beadsOpts);
-		const block = `\n${script}`;
-		const editor = ctx.hasUI ? ctx.ui.getEditorText() : "";
-		const next = appendTextToEditor(editor, block);
-		if (ctx.hasUI) await ctx.ui.setEditorText(next);
-		await finalize({ ok: true, note: "beads-script appended to editor" });
-		return { sentAt: Date.now(), formattedText: script };
-	}
-
-	const formatted = formatCommentsForEditor(target, comments);
-	const formattedForEditor = `${formatted}\n`;
-	if (ctx.hasUI) {
-		const editor = ctx.ui.getEditorText();
-		const block = hasMeaningfulText(editor) ? `\n\n${formattedForEditor.replace(/^(?:\r?\n)+/u, "")}` : formattedForEditor;
-		const next = hasMeaningfulText(editor) ? `${editor.replace(/(?:\r?\n)+$/u, "")}${block}` : formattedForEditor;
-		await ctx.ui.setEditorText(next);
-	}
-	await finalize({ ok: true, note: "prompt text appended to editor" });
-	return { sentAt: Date.now(), formattedText: formattedForEditor };
-}
-
-async function runBackupsCommand(_pi: ExtensionAPI, args: string, ctx: ExtensionContext) {
+async function runBackupsCommand(_exec: Exec, args: string, ctx: ExtensionContext) {
 	const tokens = args.trim().split(/\s+/).filter(Boolean);
 	const sub = tokens[0] ?? "list";
 
@@ -157,22 +85,22 @@ async function runBackupsCommand(_pi: ExtensionAPI, args: string, ctx: Extension
 	notify(ctx, `pi-diff: ${entries.length} backup file(s) — see terminal`, "info");
 }
 
-async function runDiffCommand(pi: ExtensionAPI, server: { instance: DiffServer | null }, args: string, ctx: ExtensionContext) {
+async function runDiffCommand(exec: Exec, server: { instance: DiffServer | null }, args: string, ctx: ExtensionContext) {
 	if (!ctx.hasUI) return;
 
-	if (!(await isGitRepository(pi, ctx.cwd))) {
+	if (!(await isGitRepository(exec, ctx.cwd))) {
 		notify(ctx, "This command only works inside a git repository.", "error");
 		return;
 	}
 
 	const settings = await loadSettings(ctx.cwd);
 
-	const target = await resolveDiffTargetFromArgs(pi, ctx, args);
+	const target = await resolveDiffTargetFromArgs(exec, ctx, args);
 	if (!target) return;
 
 	try {
 		let currentSettings: DiffSettings = settings;
-		let viewerData = await buildDiffViewerData(pi, ctx.cwd, target);
+		let viewerData = await buildDiffViewerData(exec, ctx.cwd, target);
 		let hasServedInitialBootstrap = false;
 
 		const computeBootstrap = () => ({
@@ -192,12 +120,30 @@ async function runDiffCommand(pi: ExtensionAPI, server: { instance: DiffServer |
 					hasServedInitialBootstrap = true;
 					return computeBootstrap();
 				}
-				viewerData = await buildDiffViewerData(pi, ctx.cwd, target);
+				viewerData = await buildDiffViewerData(exec, ctx.cwd, target);
 				currentSettings = await loadSettings(ctx.cwd);
 				return computeBootstrap();
 			},
 			loadFile: async (fileId) => viewerData.filePayloads.get(fileId) ?? null,
-			sendComments: async (comments: DiffComment[]) => handleSendComments(pi, ctx, currentSettings, viewerData.target, comments),
+			sendComments: async (comments: DiffComment[]): Promise<SendCommentsResponse> => {
+				return await handleSendComments(
+					{
+						exec,
+						cwd: ctx.cwd,
+						sessionFile: ctx.sessionManager?.getSessionFile?.() ?? null,
+						settings: currentSettings,
+						target: viewerData.target,
+						notify: (message, level) => notify(ctx, message, level ?? "info"),
+						editor: ctx.hasUI
+							? {
+								getText: () => ctx.ui.getEditorText(),
+								setText: (value) => ctx.ui.setEditorText(value),
+							}
+							: undefined,
+					},
+					comments,
+				);
+			},
 			setBeadsEnabled: async (enabled: boolean) => {
 				const nextOutput: DiffSettings["output"] = enabled ? "beads" : "prompt";
 				if (currentSettings.output !== nextOutput) {
@@ -211,7 +157,7 @@ async function runDiffCommand(pi: ExtensionAPI, server: { instance: DiffServer |
 			},
 		});
 
-		const opened = await openViewer(pi, ctx.cwd, session.url, settings);
+		const opened = await openViewer(exec, ctx.cwd, session.url, settings);
 		if (!opened.ok) {
 			notify(ctx, opened.message, "error");
 			return;
@@ -269,7 +215,7 @@ function buildSettingsPatch(key: string, value: string): Partial<DiffSettings> {
 	}
 }
 
-async function runSettingsCommand(_pi: ExtensionAPI, args: string, ctx: ExtensionContext) {
+async function runSettingsCommand(args: string, ctx: ExtensionContext) {
 	if (!ctx.hasUI) return;
 
 	let parsed: ReturnType<typeof parseSettingsArgs>;
@@ -301,21 +247,22 @@ async function runSettingsCommand(_pi: ExtensionAPI, args: string, ctx: Extensio
 
 export function createDiffExtension() {
 	return function (pi: ExtensionAPI) {
+		const exec = makeExec(pi);
 		const server: { instance: DiffServer | null } = { instance: null };
 
 		pi.registerCommand(DIFF_COMMAND, {
 			description: "Open a GitHub-style diff viewer for review",
-			handler: async (args, ctx) => runDiffCommand(pi, server, args, ctx),
+			handler: async (args, ctx) => runDiffCommand(exec, server, args, ctx),
 		});
 
 		pi.registerCommand(SETTINGS_COMMAND, {
 			description: "Show or update pi-diff settings (viewer, output, beads…)",
-			handler: async (args, ctx) => runSettingsCommand(pi, args, ctx),
+			handler: async (args, ctx) => runSettingsCommand(args, ctx),
 		});
 
 		pi.registerCommand(BACKUPS_COMMAND, {
 			description: "List pi-diff comment-send backups (use `/diff-backups list`)",
-			handler: async (args, ctx) => runBackupsCommand(pi, args, ctx),
+			handler: async (args, ctx) => runBackupsCommand(exec, args, ctx),
 		});
 
 		pi.on("session_shutdown", async () => {

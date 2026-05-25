@@ -1,4 +1,4 @@
-import type { DiffComment, DiffLineComment, ResolvedDiffTarget } from "./types";
+import type { DiffComment, DiffLineComment, ResolvedDiffTarget } from "./types.js";
 
 export type BeadsFormatOptions = {
 	command: string;

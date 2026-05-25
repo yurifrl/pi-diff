@@ -1,22 +1,23 @@
 import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
-import type { File as ParsedDiffFile } from "gitdiff-parser";
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+// `gitdiff-parser` is a transitive dep of `react-diff-view` and ships only
+// CommonJS types; rather than adding it as a direct dependency we declare
+// the small surface we use locally.
+type ParsedDiffFile = {
+	type: "add" | "delete" | "rename" | "modify" | "copy";
+	oldPath?: string;
+	newPath?: string;
+	isBinary?: boolean;
+};
 import { parseDiff } from "react-diff-view";
-import type { DiffFileEntry, DiffFilePayload, DiffFileStatus, DiffTarget, DiffViewerData, RepoMetadata, ResolvedDiffTarget } from "./types";
+import type { Exec, ExecResult } from "./exec.js";
+import type { DiffFileEntry, DiffFilePayload, DiffFileStatus, DiffTarget, DiffViewerData, RepoMetadata, ResolvedDiffTarget } from "./types.js";
 
 const EMPTY_TREE_SHA = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
 const GIT_DIFF_ARGS = ["diff", "--no-color", "--no-ext-diff", "--find-renames", "--unified=3"];
 const FILTERED_PATH_PATTERNS = [/\.min\.(?:js|mjs|cjs|css)$/i, /\.(?:png|jpe?g|gif|webp|ico|bmp|tiff|avif|woff2?|eot|ttf|otf|zip|gz|bz2|7z|rar|pdf|mp4|mov|avi|webm|mp3|wav|ogg)$/i];
 const BINARY_PATH_PATTERNS = [/\.(?:png|jpe?g|gif|webp|ico|bmp|tiff|avif|woff2?|eot|ttf|otf|zip|gz|bz2|7z|rar|pdf|mp4|mov|avi|webm|mp3|wav|ogg)$/i];
-
-type ExecResult = {
-	stdout: string;
-	stderr: string;
-	code: number;
-	killed?: boolean;
-};
 
 type RawDiffFile = {
 	parsed: ParsedDiffFile;
@@ -28,8 +29,8 @@ export type DefaultBranchInfo = {
 	isReliable: boolean;
 };
 
-async function exec(pi: ExtensionAPI, command: string, args: string[], cwd?: string): Promise<ExecResult> {
-	return await pi.exec(command, args, cwd ? { cwd } : undefined);
+async function run(exec: Exec, command: string, args: string[], cwd?: string): Promise<ExecResult> {
+	return await exec(command, args, cwd ? { cwd } : undefined);
 }
 
 function normalizeGitPath(value: string): string {
@@ -76,22 +77,22 @@ function parseDiffIntoFiles(diffText: string): RawDiffFile[] {
 		.map((chunk) => chunk.trim())
 		.filter((chunk) => chunk.length > 0);
 	const parsedFiles = parseDiff(normalized, { nearbySequences: "zip" });
-	return parsedFiles.map((parsed, index) => ({
+	return parsedFiles.map((parsed: ParsedDiffFile, index: number) => ({
 		parsed,
 		rawPatch: patches[index] ?? "",
 	}));
 }
 
-async function runGitDiff(pi: ExtensionAPI, cwd: string, args: string[]): Promise<string> {
-	const result = await exec(pi, "git", [...GIT_DIFF_ARGS, ...args], cwd);
+async function runGitDiff(exec: Exec, cwd: string, args: string[]): Promise<string> {
+	const result = await run(exec, "git", [...GIT_DIFF_ARGS, ...args], cwd);
 	if (result.code !== 0) {
 		throw new Error(result.stderr.trim() || result.stdout.trim() || `git ${args.join(" ")} failed`);
 	}
 	return result.stdout;
 }
 
-async function getCommitTitle(pi: ExtensionAPI, sha: string, cwd?: string): Promise<string | null> {
-	const { stdout, code } = await exec(pi, "git", ["show", "--no-patch", "--format=%s", sha], cwd);
+async function getCommitTitle(exec: Exec, sha: string, cwd?: string): Promise<string | null> {
+	const { stdout, code } = await run(exec, "git", ["show", "--no-patch", "--format=%s", sha], cwd);
 	if (code !== 0) {
 		return null;
 	}
@@ -99,8 +100,8 @@ async function getCommitTitle(pi: ExtensionAPI, sha: string, cwd?: string): Prom
 	return title || null;
 }
 
-async function getCommitParent(pi: ExtensionAPI, sha: string, cwd?: string): Promise<string> {
-	const { stdout, code } = await exec(pi, "git", ["rev-parse", `${sha}^`], cwd);
+async function getCommitParent(exec: Exec, sha: string, cwd?: string): Promise<string> {
+	const { stdout, code } = await run(exec, "git", ["rev-parse", `${sha}^`], cwd);
 	if (code !== 0) {
 		return EMPTY_TREE_SHA;
 	}
@@ -108,8 +109,8 @@ async function getCommitParent(pi: ExtensionAPI, sha: string, cwd?: string): Pro
 	return parent || EMPTY_TREE_SHA;
 }
 
-async function getUntrackedPaths(pi: ExtensionAPI, cwd: string): Promise<string[]> {
-	const { stdout, code } = await exec(pi, "git", ["ls-files", "--others", "--exclude-standard"], cwd);
+async function getUntrackedPaths(exec: Exec, cwd: string): Promise<string[]> {
+	const { stdout, code } = await run(exec, "git", ["ls-files", "--others", "--exclude-standard"], cwd);
 	if (code !== 0 || !stdout.trim()) {
 		return [];
 	}
@@ -120,8 +121,8 @@ async function getUntrackedPaths(pi: ExtensionAPI, cwd: string): Promise<string[
 		.filter((value) => value.length > 0);
 }
 
-async function getInitialRepoPaths(pi: ExtensionAPI, cwd: string): Promise<string[]> {
-	const { stdout, code } = await exec(pi, "git", ["ls-files", "--cached", "--others", "--exclude-standard"], cwd);
+async function getInitialRepoPaths(exec: Exec, cwd: string): Promise<string[]> {
+	const { stdout, code } = await run(exec, "git", ["ls-files", "--cached", "--others", "--exclude-standard"], cwd);
 	if (code !== 0 || !stdout.trim()) {
 		return [];
 	}
@@ -132,10 +133,10 @@ async function getInitialRepoPaths(pi: ExtensionAPI, cwd: string): Promise<strin
 		.filter((value) => value.length > 0);
 }
 
-async function synthesizeAddedFilePatch(pi: ExtensionAPI, repoRoot: string, relativePath: string): Promise<string> {
+async function synthesizeAddedFilePatch(exec: Exec, repoRoot: string, relativePath: string): Promise<string> {
 	const absolutePath = path.join(repoRoot, relativePath);
-	const result = await exec(
-		pi,
+	const result = await run(
+		exec,
 		"git",
 		[
 			"diff",
@@ -199,22 +200,22 @@ function buildFileEntry(rawFile: RawDiffFile, index: number): DiffFileEntry {
 	};
 }
 
-async function loadRawDiffFilesForTarget(pi: ExtensionAPI, repoRoot: string, target: ResolvedDiffTarget): Promise<RawDiffFile[]> {
+async function loadRawDiffFilesForTarget(exec: Exec, repoRoot: string, target: ResolvedDiffTarget): Promise<RawDiffFile[]> {
 	let rawFiles: RawDiffFile[] = [];
 
 	if (target.type === "uncommitted") {
 		if (target.hasHead) {
-			const trackedDiff = await runGitDiff(pi, repoRoot, ["HEAD", "--"]);
+			const trackedDiff = await runGitDiff(exec, repoRoot, ["HEAD", "--"]);
 			rawFiles = parseDiffIntoFiles(trackedDiff);
-			const untrackedPaths = await getUntrackedPaths(pi, repoRoot);
+			const untrackedPaths = await getUntrackedPaths(exec, repoRoot);
 			for (const relativePath of untrackedPaths) {
-				const patch = await synthesizeAddedFilePatch(pi, repoRoot, relativePath);
+				const patch = await synthesizeAddedFilePatch(exec, repoRoot, relativePath);
 				rawFiles.push(...parseDiffIntoFiles(patch));
 			}
 		} else {
-			const paths = await getInitialRepoPaths(pi, repoRoot);
+			const paths = await getInitialRepoPaths(exec, repoRoot);
 			for (const relativePath of paths) {
-				const patch = await synthesizeAddedFilePatch(pi, repoRoot, relativePath);
+				const patch = await synthesizeAddedFilePatch(exec, repoRoot, relativePath);
 				rawFiles.push(...parseDiffIntoFiles(patch));
 			}
 		}
@@ -225,17 +226,17 @@ async function loadRawDiffFilesForTarget(pi: ExtensionAPI, repoRoot: string, tar
 		return [];
 	}
 
-	const diffText = await runGitDiff(pi, repoRoot, [target.baseRev, target.headRev, "--"]);
+	const diffText = await runGitDiff(exec, repoRoot, [target.baseRev, target.headRev, "--"]);
 	return parseDiffIntoFiles(diffText);
 }
 
-export async function isGitRepository(pi: ExtensionAPI, cwd: string): Promise<boolean> {
-	const { code } = await exec(pi, "git", ["rev-parse", "--git-dir"], cwd);
+export async function isGitRepository(exec: Exec, cwd: string): Promise<boolean> {
+	const { code } = await run(exec, "git", ["rev-parse", "--git-dir"], cwd);
 	return code === 0;
 }
 
-export async function getRepoRoot(pi: ExtensionAPI, cwd: string): Promise<string | null> {
-	const { stdout, code } = await exec(pi, "git", ["rev-parse", "--show-toplevel"], cwd);
+export async function getRepoRoot(exec: Exec, cwd: string): Promise<string | null> {
+	const { stdout, code } = await run(exec, "git", ["rev-parse", "--show-toplevel"], cwd);
 	if (code !== 0) {
 		return null;
 	}
@@ -243,18 +244,18 @@ export async function getRepoRoot(pi: ExtensionAPI, cwd: string): Promise<string
 	return repoRoot || null;
 }
 
-export async function hasHeadCommit(pi: ExtensionAPI, cwd: string): Promise<boolean> {
-	const { code } = await exec(pi, "git", ["rev-parse", "--verify", "HEAD^{commit}"], cwd);
+export async function hasHeadCommit(exec: Exec, cwd: string): Promise<boolean> {
+	const { code } = await run(exec, "git", ["rev-parse", "--verify", "HEAD^{commit}"], cwd);
 	return code === 0;
 }
 
-export async function hasWorkingTreeChanges(pi: ExtensionAPI, cwd: string): Promise<boolean> {
-	const { stdout, code } = await exec(pi, "git", ["status", "--porcelain"], cwd);
+export async function hasWorkingTreeChanges(exec: Exec, cwd: string): Promise<boolean> {
+	const { stdout, code } = await run(exec, "git", ["status", "--porcelain"], cwd);
 	return code === 0 && stdout.trim().length > 0;
 }
 
-export async function getCurrentBranch(pi: ExtensionAPI, cwd?: string): Promise<string | null> {
-	const { stdout, code } = await exec(pi, "git", ["branch", "--show-current"], cwd);
+export async function getCurrentBranch(exec: Exec, cwd?: string): Promise<string | null> {
+	const { stdout, code } = await run(exec, "git", ["branch", "--show-current"], cwd);
 	if (code !== 0) {
 		return null;
 	}
@@ -262,8 +263,8 @@ export async function getCurrentBranch(pi: ExtensionAPI, cwd?: string): Promise<
 	return branch || null;
 }
 
-export async function getLocalBranches(pi: ExtensionAPI, cwd?: string): Promise<string[]> {
-	const { stdout, code } = await exec(pi, "git", ["branch", "--format=%(refname:short)"], cwd);
+export async function getLocalBranches(exec: Exec, cwd?: string): Promise<string[]> {
+	const { stdout, code } = await run(exec, "git", ["branch", "--format=%(refname:short)"], cwd);
 	if (code !== 0 || !stdout.trim()) {
 		return [];
 	}
@@ -274,8 +275,8 @@ export async function getLocalBranches(pi: ExtensionAPI, cwd?: string): Promise<
 		.filter((branch) => branch.length > 0);
 }
 
-export async function getRecentCommits(pi: ExtensionAPI, limit = 20, cwd?: string): Promise<Array<{ sha: string; title: string }>> {
-	const { stdout, code } = await exec(pi, "git", ["log", "--oneline", "-n", String(limit)], cwd);
+export async function getRecentCommits(exec: Exec, limit = 20, cwd?: string): Promise<Array<{ sha: string; title: string }>> {
+	const { stdout, code } = await run(exec, "git", ["log", "--oneline", "-n", String(limit)], cwd);
 	if (code !== 0 || !stdout.trim()) {
 		return [];
 	}
@@ -293,8 +294,8 @@ export async function getRecentCommits(pi: ExtensionAPI, limit = 20, cwd?: strin
 		});
 }
 
-export async function getDefaultBranchInfo(pi: ExtensionAPI, cwd?: string): Promise<DefaultBranchInfo> {
-	const { stdout, code } = await exec(pi, "git", ["symbolic-ref", "refs/remotes/origin/HEAD", "--short"], cwd);
+export async function getDefaultBranchInfo(exec: Exec, cwd?: string): Promise<DefaultBranchInfo> {
+	const { stdout, code } = await run(exec, "git", ["symbolic-ref", "refs/remotes/origin/HEAD", "--short"], cwd);
 	if (code === 0 && stdout.trim()) {
 		return {
 			branch: stdout.trim().replace(/^origin\//, ""),
@@ -302,7 +303,7 @@ export async function getDefaultBranchInfo(pi: ExtensionAPI, cwd?: string): Prom
 		};
 	}
 
-	const branches = await getLocalBranches(pi, cwd);
+	const branches = await getLocalBranches(exec, cwd);
 	if (branches.includes("main")) {
 		return { branch: "main", isReliable: false };
 	}
@@ -312,20 +313,20 @@ export async function getDefaultBranchInfo(pi: ExtensionAPI, cwd?: string): Prom
 	return { branch: "main", isReliable: false };
 }
 
-export async function getDefaultBranch(pi: ExtensionAPI, cwd?: string): Promise<string> {
-	return (await getDefaultBranchInfo(pi, cwd)).branch;
+export async function getDefaultBranch(exec: Exec, cwd?: string): Promise<string> {
+	return (await getDefaultBranchInfo(exec, cwd)).branch;
 }
 
-export async function getMergeBase(pi: ExtensionAPI, branch: string, cwd?: string): Promise<string | null> {
-	const upstream = await exec(pi, "git", ["rev-parse", "--abbrev-ref", `${branch}@{upstream}`], cwd);
+export async function getMergeBase(exec: Exec, branch: string, cwd?: string): Promise<string | null> {
+	const upstream = await run(exec, "git", ["rev-parse", "--abbrev-ref", `${branch}@{upstream}`], cwd);
 	if (upstream.code === 0 && upstream.stdout.trim()) {
-		const mergeBase = await exec(pi, "git", ["merge-base", "HEAD", upstream.stdout.trim()], cwd);
+		const mergeBase = await run(exec, "git", ["merge-base", "HEAD", upstream.stdout.trim()], cwd);
 		if (mergeBase.code === 0 && mergeBase.stdout.trim()) {
 			return mergeBase.stdout.trim();
 		}
 	}
 
-	const mergeBase = await exec(pi, "git", ["merge-base", "HEAD", branch], cwd);
+	const mergeBase = await run(exec, "git", ["merge-base", "HEAD", branch], cwd);
 	if (mergeBase.code !== 0) {
 		return null;
 	}
@@ -341,8 +342,8 @@ export function isLikelyBinaryPath(filePath: string): boolean {
 	return BINARY_PATH_PATTERNS.some((pattern) => pattern.test(filePath));
 }
 
-export async function resolveDiffTarget(pi: ExtensionAPI, cwd: string, target: DiffTarget): Promise<ResolvedDiffTarget | null> {
-	const hasHead = await hasHeadCommit(pi, cwd);
+export async function resolveDiffTarget(exec: Exec, cwd: string, target: DiffTarget): Promise<ResolvedDiffTarget | null> {
+	const hasHead = await hasHeadCommit(exec, cwd);
 	if (target.type === "uncommitted") {
 		return {
 			type: "uncommitted",
@@ -355,7 +356,7 @@ export async function resolveDiffTarget(pi: ExtensionAPI, cwd: string, target: D
 	}
 
 	if (target.type === "baseBranch") {
-		const mergeBase = hasHead ? await getMergeBase(pi, target.branch, cwd) : EMPTY_TREE_SHA;
+		const mergeBase = hasHead ? await getMergeBase(exec, target.branch, cwd) : EMPTY_TREE_SHA;
 		if (!mergeBase) {
 			return null;
 		}
@@ -370,8 +371,8 @@ export async function resolveDiffTarget(pi: ExtensionAPI, cwd: string, target: D
 		};
 	}
 
-	const title = target.title ?? (await getCommitTitle(pi, target.sha, cwd)) ?? "Commit";
-	const baseRev = await getCommitParent(pi, target.sha, cwd);
+	const title = target.title ?? (await getCommitTitle(exec, target.sha, cwd)) ?? "Commit";
+	const baseRev = await getCommitParent(exec, target.sha, cwd);
 	return {
 		type: "commit",
 		sha: target.sha,
@@ -384,8 +385,8 @@ export async function resolveDiffTarget(pi: ExtensionAPI, cwd: string, target: D
 	};
 }
 
-export async function buildDiffViewerData(pi: ExtensionAPI, cwd: string, target: DiffTarget): Promise<DiffViewerData> {
-	const repoRoot = await getRepoRoot(pi, cwd);
+export async function buildDiffViewerData(exec: Exec, cwd: string, target: DiffTarget): Promise<DiffViewerData> {
+	const repoRoot = await getRepoRoot(exec, cwd);
 	if (!repoRoot) {
 		throw new Error("Could not determine the git repository root.");
 	}
@@ -394,12 +395,12 @@ export async function buildDiffViewerData(pi: ExtensionAPI, cwd: string, target:
 		name: path.basename(repoRoot),
 		cwd,
 	};
-	const resolvedTarget = await resolveDiffTarget(pi, repoRoot, target);
+	const resolvedTarget = await resolveDiffTarget(exec, repoRoot, target);
 	if (!resolvedTarget) {
 		throw new Error("Could not resolve the selected diff target.");
 	}
 
-	const rawFiles = await loadRawDiffFilesForTarget(pi, repoRoot, resolvedTarget);
+	const rawFiles = await loadRawDiffFilesForTarget(exec, repoRoot, resolvedTarget);
 	const visibleRawFiles = rawFiles.filter((rawFile) => {
 		const candidatePath = rawFile.parsed.newPath || rawFile.parsed.oldPath || "";
 		return !shouldFilterDiffPath(candidatePath);

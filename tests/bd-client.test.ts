@@ -1,6 +1,6 @@
 import { describe, expect, test, vi } from "vitest";
-import { buildDescription, buildTitle, createBead, createBeadsForComments, summarizeCreated, type ExecLike } from "../bd-client";
-import type { DiffComment, ResolvedDiffTarget } from "../types";
+import { buildDescription, buildTitle, createBead, createBeadsForComments, summarizeCreated, type ExecLike } from "../core/bd-client";
+import type { DiffComment, ResolvedDiffTarget } from "../core/types";
 
 const target: ResolvedDiffTarget = {
 	type: "baseBranch",
@@ -95,11 +95,10 @@ describe("createBeadsForComments", () => {
 		let counter = 0;
 		const exec: ExecLike = async () => ({ stdout: `bd-${++counter}`, stderr: "", code: 0 });
 		const results = await createBeadsForComments(
-			null as never,
+			exec,
 			[lineComment, empty, { ...lineComment, id: "c3", text: "another" }],
 			target,
 			{ command: "bd", type: "task", labels: [], priority: null, cwd: "/tmp/repo" },
-			exec,
 		);
 		expect(results).toHaveLength(2);
 		expect(results.map((r) => r.id)).toEqual(["bd-1", "bd-2"]);

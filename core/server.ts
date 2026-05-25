@@ -1,18 +1,35 @@
 import { randomUUID } from "node:crypto";
+import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { validateDiffComments } from "./comments";
-import type { ViewerBootstrapPayload, ViewerSession } from "./types";
+import { validateDiffComments } from "./comments.js";
+import type { ViewerBootstrapPayload, ViewerSession } from "./types.js";
 
 const HOST = "127.0.0.1";
 const APP_JS_BASENAME = "app.js";
 const APP_CSS_BASENAME = "app.css";
 
-const PACKAGE_DIR = fileURLToPath(new URL(".", import.meta.url));
-const WEB_ENTRY_PATH = fileURLToPath(new URL("./web/index.tsx", import.meta.url));
-const WEB_DIST_DIR = fileURLToPath(new URL("./web/dist", import.meta.url));
+/**
+ * Walk up from this file's directory to locate the package root. Works both
+ * when running TS via vitest (core/server.ts) and when running compiled JS
+ * (dist/core/server.js).
+ */
+function findPackageRoot(start: string): string {
+	let dir = start;
+	while (true) {
+		if (existsSync(path.join(dir, "package.json"))) return dir;
+		const parent = path.dirname(dir);
+		if (parent === dir) return start;
+		dir = parent;
+	}
+}
+
+const HERE = fileURLToPath(new URL(".", import.meta.url));
+const PACKAGE_DIR = findPackageRoot(HERE);
+const WEB_ENTRY_PATH = path.join(PACKAGE_DIR, "web", "index.tsx");
+const WEB_DIST_DIR = path.join(PACKAGE_DIR, "web", "dist");
 
 type AssetManifest = {
 	jsPath: string;
@@ -25,6 +42,7 @@ export type CreateViewerSessionInput = {
 	loadFile: ViewerSession["loadFile"];
 	sendComments: ViewerSession["sendComments"];
 	setBeadsEnabled?: ViewerSession["setBeadsEnabled"];
+	markDone?: ViewerSession["markDone"];
 };
 
 export type DiffServerOptions = {
@@ -168,13 +186,14 @@ export class DiffServer {
 			},
 			refreshBootstrap: input.refreshBootstrap
 				? async () => ({
-					...(await input.refreshBootstrap()),
+					...(await input.refreshBootstrap!()),
 					viewerToken: token,
 				})
 				: undefined,
 			loadFile: input.loadFile,
 			sendComments: input.sendComments,
 			setBeadsEnabled: input.setBeadsEnabled,
+			markDone: input.markDone,
 		});
 		return {
 			token,
@@ -190,7 +209,18 @@ export class DiffServer {
 	}
 
 	private async serveAsset(response: ServerResponse, assetPath: string, contentType: string) {
-		const content = await readFile(assetPath);
+		let content: Buffer | Uint8Array;
+		try {
+			content = await readFile(assetPath);
+		} catch (err) {
+			// Bun-compiled binaries embed assets at virtual paths (e.g. /$bunfs/...).
+			// node:fs may or may not resolve those depending on Bun version, so fall
+			// back to Bun.file when available.
+			const maybeBun = (globalThis as { Bun?: { file: (p: string) => { arrayBuffer: () => Promise<ArrayBuffer> } } }).Bun;
+			if (!maybeBun) throw err;
+			const buf = await maybeBun.file(assetPath).arrayBuffer();
+			content = new Uint8Array(buf);
+		}
 		response.statusCode = 200;
 		response.setHeader("Content-Type", `${contentType}; charset=utf-8`);
 		response.end(content);
@@ -293,6 +323,25 @@ export class DiffServer {
 				}
 				const result = await session.sendComments(comments);
 				json(response, 200, result);
+				return;
+			}
+
+			const doneMatch = pathname.match(/^\/api\/viewer\/([^/]+)\/done$/);
+			if (doneMatch && request.method === "POST") {
+				const token = doneMatch[1] ?? "";
+				if (!isValidViewerToken(token)) {
+					json(response, 400, { error: "Invalid viewer token." });
+					return;
+				}
+				const session = this.sessions.get(token);
+				if (!session) {
+					json(response, 404, { error: "Viewer session expired." });
+					return;
+				}
+				if (session.markDone) {
+					try { await session.markDone(); } catch { /* ignore */ }
+				}
+				json(response, 200, { ok: true });
 				return;
 			}
 

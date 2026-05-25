@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { buildNewPaneArgs, buildNewSurfaceArgs, parseCmuxIdentify, resolveCmuxCallerContext } from "../cmux";
+import { buildNewPaneArgs, buildNewSurfaceArgs, parseCmuxIdentify, resolveCmuxCallerContext } from "../core/cmux";
 
 describe("parseCmuxIdentify", () => {
 	test("reads workspace and pane refs from json output", () => {
@@ -63,25 +63,21 @@ describe("cmux open command builders", () => {
 
 describe("resolveCmuxCallerContext", () => {
 	test("parses cmux identify output", async () => {
-		const pi = {
-			exec: async (_command: string, _args: string[]) => ({
-				stdout: '{"workspace":{"id":"workspace:1"},"caller":{"pane_ref":"pane:current"}}',
-				stderr: "",
-				code: 0,
-			}),
-		} as any;
+		const exec = (async (_command: string, _args: string[]) => ({
+			stdout: '{"workspace":{"id":"workspace:1"},"caller":{"pane_ref":"pane:current"}}',
+			stderr: "",
+			code: 0,
+		})) as any;
 
-		await expect(resolveCmuxCallerContext(pi, "/tmp/project", {})).resolves.toEqual({
+		await expect(resolveCmuxCallerContext(exec, "/tmp/project", {})).resolves.toEqual({
 			workspaceId: "workspace:1",
 			callerPaneRef: "pane:current",
 		});
 	});
 
 	test("returns null when cmux identify fails", async () => {
-		const pi = {
-			exec: async () => ({ stdout: "", stderr: "not in cmux", code: 1 }),
-		} as any;
+		const exec = (async () => ({ stdout: "", stderr: "not in cmux", code: 1 })) as any;
 
-		await expect(resolveCmuxCallerContext(pi, "/tmp/project")).resolves.toBeNull();
+		await expect(resolveCmuxCallerContext(exec, "/tmp/project")).resolves.toBeNull();
 	});
 });

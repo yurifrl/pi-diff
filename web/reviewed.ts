@@ -1,4 +1,4 @@
-import type { DiffFileEntry } from "../types";
+import type { DiffFileEntry } from "../core/types";
 
 function getFileFingerprint(file: DiffFileEntry): string {
 	return file.fingerprint ?? [file.status, file.oldPath ?? "", file.newPath ?? "", file.path].join("\u0000");

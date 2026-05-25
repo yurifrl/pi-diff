@@ -3,8 +3,8 @@ import { mkdtempSync, rmSync, writeFileSync, mkdirSync, renameSync, unlinkSync, 
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
-import { buildDiffViewerData, getMergeBase, getRepoRoot, hasHeadCommit, isGitRepository, resolveDiffTarget } from "../git";
-import type { DiffTarget } from "../types";
+import { buildDiffViewerData, getMergeBase, getRepoRoot, hasHeadCommit, isGitRepository, resolveDiffTarget } from "../core/git";
+import type { DiffTarget } from "../core/types";
 
 const tempDirs: string[] = [];
 
@@ -44,20 +44,18 @@ function commitAll(repoRoot: string, message: string): string {
 }
 
 function createPi() {
-	return {
-		exec: async (command: string, args: string[], options?: { cwd?: string }) => {
-			const result = spawnSync(command, args, {
-				cwd: options?.cwd,
-				encoding: "utf8",
-			});
-			return {
-				stdout: result.stdout,
-				stderr: result.stderr,
-				code: result.status ?? 1,
-				killed: false,
-			};
-		},
-	} as any;
+	return async (command: string, args: string[], options?: { cwd?: string }) => {
+		const result = spawnSync(command, args, {
+			cwd: options?.cwd,
+			encoding: "utf8",
+		});
+		return {
+			stdout: result.stdout,
+			stderr: result.stderr,
+			code: result.status ?? 1,
+			killed: false,
+		};
+	};
 }
 
 async function buildViewer(repoRoot: string, target: DiffTarget) {

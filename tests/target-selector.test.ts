@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { parseDiffTargetArgs, resolveDiffTargetFromArgs } from "../target-selector";
+import { parseDiffTargetArgs, resolveDiffTargetFromArgs } from "../pi-target-selector";
 
 describe("parseDiffTargetArgs", () => {
 	test("parses supported direct args", () => {

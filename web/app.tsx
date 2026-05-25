@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { getChangeKey, type ChangeData } from "react-diff-view";
-import { findReusableDraftComment, removeCommentById, updateCommentText } from "../comments";
-import type { DiffComment, DiffFileEntry, DiffFilePayload, DiffLineComment, DiffOverallComment, DiffViewMode, SendCommentsResponse, ViewerBootstrapPayload, ViewerSettingsResponse } from "../types";
+import { findReusableDraftComment, removeCommentById, updateCommentText } from "../core/comments";
+import type { DiffComment, DiffFileEntry, DiffFilePayload, DiffLineComment, DiffOverallComment, DiffViewMode, SendCommentsResponse, ViewerBootstrapPayload, ViewerSettingsResponse } from "../core/types";
 import { filterFilesByQuery } from "./search";
 import { getAppLayoutClassName } from "./layout";
 import { ensureCollapsedStateForOverallComments } from "./overall-comments";
@@ -98,6 +98,7 @@ export function App({ viewerToken }: AppProps) {
 	const [beadsToggleError, setBeadsToggleError] = useState<string | null>(null);
 	const [expired, setExpired] = useState(false);
 	const [bootstrapError, setBootstrapError] = useState<string | null>(null);
+	const [finished, setFinished] = useState(false);
 	const initialComments = useMemo(() => normalizeOverallComments(initialStoredState.comments), [initialStoredState.comments]);
 	const [sidebarCollapsed, setSidebarCollapsed] = useState(initialStoredState.sidebarCollapsed);
 	const [searchQuery, setSearchQuery] = useState(initialStoredState.searchQuery);
@@ -398,6 +399,38 @@ export function App({ viewerToken }: AppProps) {
 		[expired, viewerToken],
 	);
 
+	const markDone = useCallback(async () => {
+		try {
+			await fetch(`/api/viewer/${viewerToken}/done`, { method: "POST" });
+		} catch {
+			// ignore; the CLI may have already exited
+		}
+		setFinished(true);
+	}, [viewerToken]);
+
+	const handleDone = useCallback(async () => {
+		if (finished) return;
+		if (unsentComments.length > 0) {
+			try { await sendComments(unsentComments); } catch { /* ignore; mark done anyway */ }
+		}
+		await markDone();
+	}, [finished, markDone, sendComments, unsentComments]);
+
+	// Best-effort: signal "done" when the user closes the tab without clicking Done.
+	useEffect(() => {
+		const onUnload = () => {
+			try {
+				navigator.sendBeacon?.(`/api/viewer/${viewerToken}/done`);
+			} catch { /* ignore */ }
+		};
+		window.addEventListener("beforeunload", onUnload);
+		window.addEventListener("pagehide", onUnload);
+		return () => {
+			window.removeEventListener("beforeunload", onUnload);
+			window.removeEventListener("pagehide", onUnload);
+		};
+	}, [viewerToken]);
+
 	const toggleFileCollapsed = useCallback((fileId: string) => {
 		setCollapsedFileIds((current) => ({
 			...current,
@@ -547,7 +580,7 @@ export function App({ viewerToken }: AppProps) {
 		const handleKeyDown = (event: KeyboardEvent) => {
 			if (isSendAllShortcut(event)) {
 				event.preventDefault();
-				void sendComments(unsentComments);
+				void handleDone();
 				return;
 			}
 
@@ -605,6 +638,28 @@ export function App({ viewerToken }: AppProps) {
 
 	return (
 		<div className={`app-shell ${wrapLines ? "app-shell--wrap" : ""}`}>
+			{finished ? (
+				<div
+					style={{
+						position: "fixed",
+						inset: 0,
+						background: "rgba(13, 17, 23, 0.92)",
+						color: "#e6edf3",
+						display: "flex",
+						alignItems: "center",
+						justifyContent: "center",
+						flexDirection: "column",
+						zIndex: 9999,
+						textAlign: "center",
+						padding: "24px",
+					}}
+				>
+					<div style={{ fontSize: "24px", fontWeight: 600, marginBottom: "12px" }}>✓ Submitted</div>
+					<div style={{ fontSize: "16px", opacity: 0.8, maxWidth: "480px" }}>
+						You are done. Close this tab and return to the terminal.
+					</div>
+				</div>
+			) : null}
 			<Toolbar
 				repoName={bootstrap?.repo.name ?? "diff-cmux"}
 				targetLabel={bootstrap?.target.label ?? "Loading…"}
@@ -620,7 +675,7 @@ export function App({ viewerToken }: AppProps) {
 				onToggleBeads={() => void toggleBeads()}
 				onToggleSidebarPopover={openSidebarSearch}
 				onRefresh={refreshViewer}
-				onSendAll={() => void sendComments(unsentComments)}
+				onSendAll={() => void handleDone()}
 			/>
 			<div className={getAppLayoutClassName(sidebarCollapsed, sidebarPopoverOpen)}>
 				<button

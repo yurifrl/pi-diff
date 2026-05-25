@@ -108,4 +108,5 @@ export type ViewerSession = {
 	loadFile: (fileId: string) => Promise<DiffFilePayload | null>;
 	sendComments: (comments: DiffComment[]) => Promise<SendCommentsResponse>;
 	setBeadsEnabled?: (enabled: boolean) => Promise<ViewerSettingsResponse>;
+	markDone?: () => Promise<void> | void;
 };

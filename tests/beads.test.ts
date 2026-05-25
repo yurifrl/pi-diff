@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
-import { formatCommentAsBeadsCommand, formatCommentsAsBeadsScript } from "../beads";
-import type { DiffComment, ResolvedDiffTarget } from "../types";
+import { formatCommentAsBeadsCommand, formatCommentsAsBeadsScript } from "../core/beads";
+import type { DiffComment, ResolvedDiffTarget } from "../core/types";
 
 const target: ResolvedDiffTarget = {
 	type: "baseBranch",

@@ -11,9 +11,9 @@ import {
 	resolveBackupPath,
 	summarizeBeadsResult,
 	updateLastResult,
-} from "../backups";
-import type { CreatedBead } from "../bd-client";
-import type { DiffComment, ResolvedDiffTarget } from "../types";
+} from "../core/backups";
+import type { CreatedBead } from "../core/bd-client";
+import type { DiffComment, ResolvedDiffTarget } from "../core/types";
 
 let dir: string;
 let originalHome: string | undefined;
@@ -36,18 +36,8 @@ const comment: DiffComment = {
 	sentAt: null,
 };
 
-function makeCtx(sessionFile: string | undefined) {
-	return {
-		cwd: "/repo",
-		hasUI: false,
-		// biome-ignore lint/suspicious/noExplicitAny: minimal stub for tests
-		ui: {} as any,
-		// biome-ignore lint/suspicious/noExplicitAny: minimal stub for tests
-		sessionManager: {
-			getSessionFile: () => sessionFile,
-		} as any,
-		// biome-ignore lint/suspicious/noExplicitAny: minimal stub for tests
-	} as any;
+function makeCtx(sessionFile: string | undefined): string | null {
+	return sessionFile ?? null;
 }
 
 beforeEach(async () => {

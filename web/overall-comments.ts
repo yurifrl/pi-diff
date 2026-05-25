@@ -1,4 +1,4 @@
-import type { DiffComment } from "../types";
+import type { DiffComment } from "../core/types";
 
 export function ensureCollapsedStateForOverallComments(
 	collapsedCommentIds: Record<string, boolean>,
