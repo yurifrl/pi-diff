@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import React, { useEffect, useState } from "react";
 import { Box, Text, useApp, useInput, useStdin } from "ink";
+import { Spinner } from "@inkjs/ui";
 import { appendAttempt, summarizeBeadsResult, updateLastResult } from "../core/backups.js";
 import { buildTitle, createBeadsForComments, isBeadsAvailable, isBeadsRepoConfigured, summarizeCreated, type CreatedBead } from "../core/bd-client.js";
 import { formatCommentsAsBeadsScript } from "../core/beads.js";
@@ -462,7 +463,17 @@ export function Manager(props: ManagerProps): React.JSX.Element {
 	});
 
 	const safeCursor = items.length === 0 ? 0 : Math.min(cursor, items.length - 1);
-	const header = `pi-diff — ${items.length} comment${items.length === 1 ? "" : "s"}  ·  output: ${settings.output}`;
+
+	const ACCENT = "magentaBright";
+	const MUTED = "gray";
+	const SUCCESS = "greenBright";
+	const DANGER = "redBright";
+
+	const kindFor = (c: DiffComment): { label: string; color: string } => {
+		if (c.kind === "line") return { label: "LINE", color: "cyanBright" };
+		if (c.kind === "file") return { label: "FILE", color: "yellowBright" };
+		return { label: "ALL ", color: "magentaBright" };
+	};
 
 	if (mode.kind === "view") {
 		const item = items[mode.index];
@@ -502,62 +513,108 @@ export function Manager(props: ManagerProps): React.JSX.Element {
 
 	if (mode.kind === "submitting") {
 		return (
-			<Box flexDirection="column">
-				<Text>Submitting…</Text>
+			<Box flexDirection="column" paddingX={1} paddingY={1}>
+				<Box>
+					<Spinner label="submitting" />
+				</Box>
 			</Box>
 		);
 	}
 
 	if (mode.kind === "editing") {
 		return (
-			<Box flexDirection="column">
-				<Text>Opening editor…</Text>
+			<Box flexDirection="column" paddingX={1} paddingY={1}>
+				<Spinner label="opening editor" />
 			</Box>
 		);
 	}
 
 	return (
-		<Box flexDirection="column">
-			<Text bold>{header}</Text>
-			<Box height={1} />
+		<Box flexDirection="column" paddingX={1}>
+			{/* Header */}
+			<Box marginBottom={1}>
+				<Text>
+					<Text bold color={ACCENT}>◆ pi-diff</Text>
+					<Text color={MUTED}>  ·  </Text>
+					<Text bold>{items.length}</Text>
+					<Text color={MUTED}> comment{items.length === 1 ? "" : "s"}  ·  output: </Text>
+					<Text bold color={ACCENT}>{settings.output}</Text>
+				</Text>
+			</Box>
+
+			{/* Item list */}
 			{items.length === 0 ? (
-				<Text dimColor>(empty queue)</Text>
+				<Box paddingY={1}>
+					<Text color={MUTED}>(empty queue — press </Text>
+					<Text color={ACCENT}>q</Text>
+					<Text color={MUTED}> to exit)</Text>
+				</Box>
 			) : (
-				items.map((it, i) => {
-					const active = i === safeCursor;
-					const loc = locationFor(it.comment).padEnd(28).slice(0, 28);
-					const summary = summarize(it.comment.text);
-					return (
-						<Text key={it.comment.id} color={active ? "cyan" : undefined}>
-							{active ? "> " : "  "}
-							{i + 1}. {loc}  {summary}
-							{it.lastError ? <Text color="red"> (failed: {it.lastError})</Text> : null}
-						</Text>
-					);
-				})
+				<Box flexDirection="column">
+					{items.map((it, i) => {
+						const active = i === safeCursor;
+						const kind = kindFor(it.comment);
+						const loc = locationFor(it.comment);
+						const summary = summarize(it.comment.text, 56);
+						return (
+							<Box key={it.comment.id}>
+								<Box width={2}>
+									<Text color={active ? ACCENT : MUTED}>{active ? "❯" : " "}</Text>
+								</Box>
+								<Box width={3}>
+									<Text color={MUTED}>{String(i + 1).padStart(2)}.</Text>
+								</Box>
+								<Box width={6}>
+									<Text color={kind.color}>{kind.label}</Text>
+								</Box>
+								<Box width={32}>
+									<Text color={active ? "white" : undefined} bold={active}>{loc}</Text>
+								</Box>
+								<Box flexGrow={1}>
+									<Text color={active ? undefined : MUTED}>{summary}</Text>
+								</Box>
+								{it.lastError ? <Text color={DANGER}>  (failed)</Text> : null}
+							</Box>
+						);
+					})}
+				</Box>
 			)}
-			<Box height={1} />
-			{mode.kind === "results" ? (
-				<>
-					<Text bold>Submission results:</Text>
-					{mode.created.map((r, i) => (
-						<Text key={i} color={r.id ? "green" : "red"}>
-							{r.id ? `  ✓ ${r.id}  ${r.title}` : `  ✗ ${r.title} — ${r.error ?? "unknown"}`}
+
+			{/* Footer */}
+			<Box marginTop={1} flexDirection="column">
+				{mode.kind === "results" ? (
+					<>
+						<Text bold color={ACCENT}>submission results</Text>
+						{mode.created.map((r, i) => (
+							<Box key={i}>
+								<Text color={r.id ? SUCCESS : DANGER}>{r.id ? "  ✓ " : "  ✗ "}</Text>
+								<Text>{r.id ? `${r.id}  ${r.title}` : `${r.title}`}</Text>
+								{!r.id ? <Text color={MUTED}> — {r.error ?? "unknown"}</Text> : null}
+							</Box>
+						))}
+						<Box marginTop={1}>
+							<Text color={MUTED}>press any key to return</Text>
+						</Box>
+					</>
+				) : mode.kind === "confirmClear" ? (
+					<Text>
+						<Text color={DANGER}>! </Text>
+						clear all <Text bold>{items.length}</Text> item(s)? [<Text bold color={ACCENT}>y</Text>/N]
+					</Text>
+				) : mode.kind === "confirmQuit" ? (
+					<Text>
+						<Text color={DANGER}>! </Text>
+						discard <Text bold>{items.length}</Text> item(s)? [<Text bold color={ACCENT}>y</Text>/N]
+					</Text>
+				) : (
+					<>
+						<Text color={MUTED}>
+							<Text color={ACCENT}>↑↓</Text> nav  ·  <Text color={ACCENT}>↵</Text> view  ·  <Text color={ACCENT}>e</Text> edit  ·  <Text color={ACCENT}>d</Text> delete  ·  <Text color={ACCENT}>s</Text> submit  ·  <Text color={ACCENT}>c</Text> clear  ·  <Text color={ACCENT}>q</Text> quit
 						</Text>
-					))}
-					<Box height={1} />
-					<Text dimColor>(press any key to return)</Text>
-				</>
-			) : mode.kind === "confirmClear" ? (
-				<Text>Clear all {items.length} item(s)? [y/N]</Text>
-			) : mode.kind === "confirmQuit" ? (
-				<Text>Discard {items.length} item(s)? [y/N]</Text>
-			) : (
-				<>
-					<Text dimColor>[↑↓] navigate  [enter] view  [e] edit  [d] delete  [s] submit all  [c] clear  [q] quit</Text>
-					{error ? <Text color="red">{error}</Text> : null}
-				</>
-			)}
+						{error ? <Text color={DANGER}>{error}</Text> : null}
+					</>
+				)}
+			</Box>
 		</Box>
 	);
 }
