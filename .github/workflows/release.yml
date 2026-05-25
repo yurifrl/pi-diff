@@ -15,25 +15,9 @@ permissions:
   contents: write
 
 jobs:
-  build:
-    name: build (${{ matrix.target }})
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - target: darwin-arm64
-            runner: macos-14
-            bun-target: bun-darwin-arm64
-          - target: darwin-x64
-            runner: macos-13
-            bun-target: bun-darwin-x64
-          - target: linux-x64
-            runner: ubuntu-latest
-            bun-target: bun-linux-x64
-          - target: linux-arm64
-            runner: ubuntu-24.04-arm
-            bun-target: bun-linux-arm64
-    runs-on: ${{ matrix.runner }}
+  release:
+    name: build + release
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
@@ -49,45 +33,30 @@ jobs:
       - name: Build web assets
         run: bun run scripts/build-web.mjs
 
-      - name: Compile binary
+      - name: Cross-compile binaries (bun)
         run: |
-          bun scripts/build-binary.ts \
-            "$PWD/pi-diff-${{ matrix.target }}" \
-            "${{ matrix.bun-target }}"
-          chmod +x "pi-diff-${{ matrix.target }}"
+          set -euo pipefail
+          mkdir -p artifacts
+          declare -A TARGETS=(
+            [darwin-arm64]=bun-darwin-arm64
+            [darwin-x64]=bun-darwin-x64
+            [linux-x64]=bun-linux-x64
+            [linux-arm64]=bun-linux-arm64
+          )
+          for target in "${!TARGETS[@]}"; do
+            out="artifacts/pi-diff-${target}"
+            echo "→ building ${out} (${TARGETS[$target]})"
+            bun scripts/build-binary.ts "$out" "${TARGETS[$target]}"
+            chmod +x "$out"
+          done
 
-      - name: Smoke test (--help) on native runners
-        if: matrix.target == 'darwin-arm64' || matrix.target == 'linux-x64' || matrix.target == 'darwin-x64' || matrix.target == 'linux-arm64'
-        run: ./pi-diff-${{ matrix.target }} --help
+      - name: Smoke test linux-x64 binary
+        run: ./artifacts/pi-diff-linux-x64 --help
 
-      - uses: actions/upload-artifact@v4
-        with:
-          name: pi-diff-${{ matrix.target }}
-          path: pi-diff-${{ matrix.target }}
-          if-no-files-found: error
-
-  release:
-    name: release
-    needs: build
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/download-artifact@v4
-        with:
-          path: artifacts
-          pattern: pi-diff-*
-
-      - name: Flatten artifacts and compute checksums
+      - name: Compute checksums
         run: |
           set -euo pipefail
           cd artifacts
-          for d in pi-diff-*; do
-            if [ -d "$d" ]; then
-              mv "$d"/* .
-              rmdir "$d"
-            fi
-          done
           for f in pi-diff-*; do
             shasum -a 256 "$f" > "$f.sha256"
           done
