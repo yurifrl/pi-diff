@@ -120,18 +120,18 @@ if ! REPO="$(resolve_repo)"; then
 fi
 
 # ----------------------------------------------------------------------------
-# Resolve version.
+# Resolve version (or fall back to building from source).
 # ----------------------------------------------------------------------------
 
+BUILD_FROM_SOURCE=""
 if [ -z "$VERSION" ]; then
 	command -v curl >/dev/null 2>&1 || { err "curl is required"; exit 1; }
 	api_url="https://api.github.com/repos/$REPO/releases/latest"
-	# Extract tag_name without jq.
-	VERSION="$(curl -fsSL "$api_url" | sed -nE 's/.*"tag_name":[[:space:]]*"([^"]+)".*/\1/p' | head -n1)"
+	# Extract tag_name without jq. Don't use -f so 404 doesn't kill the pipe.
+	VERSION="$(curl -sSL "$api_url" | sed -nE 's/.*"tag_name":[[:space:]]*"([^"]+)".*/\1/p' | head -n1)"
 	if [ -z "$VERSION" ]; then
-		err "could not determine latest release for $REPO."
-		err "pass --version vX.Y.Z explicitly."
-		exit 1
+		err "no releases found for $REPO — falling back to build-from-source."
+		BUILD_FROM_SOURCE=1
 	fi
 fi
 
@@ -163,22 +163,38 @@ TMP="$(mktemp -d)"
 cleanup() { rm -rf "$TMP"; }
 trap cleanup EXIT INT TERM
 
-echo "→ downloading $ASSET ($VERSION) from $REPO"
-curl -fL --progress-bar -o "$TMP/$ASSET" "$BASE_URL/$ASSET"
-curl -fL --silent       -o "$TMP/$ASSET.sha256" "$BASE_URL/$ASSET.sha256"
+if [ -n "$BUILD_FROM_SOURCE" ]; then
+	command -v git >/dev/null 2>&1 || { err "git is required for build-from-source"; exit 1; }
+	command -v bun >/dev/null 2>&1 || { err "bun is required for build-from-source (https://bun.sh)"; exit 1; }
+	echo "→ cloning $REPO"
+	git clone --depth 1 "https://github.com/$REPO.git" "$TMP/src"
+	(
+		cd "$TMP/src"
+		echo "→ installing deps (bun install)"
+		bun install --frozen-lockfile 2>/dev/null || bun install
+		echo "→ bundling web assets"
+		node ./scripts/build-web.mjs
+		echo "→ building binary (bun compile)"
+		bun scripts/build-binary.ts "$TMP/$ASSET"
+	)
+else
+	echo "→ downloading $ASSET ($VERSION) from $REPO"
+	curl -fL --progress-bar -o "$TMP/$ASSET" "$BASE_URL/$ASSET"
+	curl -fL --silent       -o "$TMP/$ASSET.sha256" "$BASE_URL/$ASSET.sha256"
 
-echo "→ verifying checksum"
-(
-	cd "$TMP"
-	if command -v shasum >/dev/null 2>&1; then
-		shasum -a 256 -c "$ASSET.sha256"
-	elif command -v sha256sum >/dev/null 2>&1; then
-		sha256sum -c "$ASSET.sha256"
-	else
-		err "neither shasum nor sha256sum is available"
-		exit 1
-	fi
-)
+	echo "→ verifying checksum"
+	(
+		cd "$TMP"
+		if command -v shasum >/dev/null 2>&1; then
+			shasum -a 256 -c "$ASSET.sha256"
+		elif command -v sha256sum >/dev/null 2>&1; then
+			sha256sum -c "$ASSET.sha256"
+		else
+			err "neither shasum nor sha256sum is available"
+			exit 1
+		fi
+	)
+fi
 
 chmod 0755 "$TMP/$ASSET"
 DEST="$PREFIX/pi-diff"
@@ -190,7 +206,11 @@ else
 	chmod 0755 "$DEST"
 fi
 
-echo "installed pi-diff $VERSION → $DEST"
+if [ -n "$BUILD_FROM_SOURCE" ]; then
+	echo "installed pi-diff (built from source @ main) → $DEST"
+else
+	echo "installed pi-diff $VERSION → $DEST"
+fi
 
 # Warn if PREFIX isn't on PATH.
 case ":$PATH:" in
