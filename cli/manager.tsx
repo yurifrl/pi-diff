@@ -464,15 +464,10 @@ export function Manager(props: ManagerProps): React.JSX.Element {
 
 	const safeCursor = items.length === 0 ? 0 : Math.min(cursor, items.length - 1);
 
-	const ACCENT = "magentaBright";
-	const MUTED = "gray";
-	const SUCCESS = "greenBright";
-	const DANGER = "redBright";
-
-	const kindFor = (c: DiffComment): { label: string; color: string } => {
-		if (c.kind === "line") return { label: "LINE", color: "cyanBright" };
-		if (c.kind === "file") return { label: "FILE", color: "yellowBright" };
-		return { label: "ALL ", color: "magentaBright" };
+	const kindLabel = (c: DiffComment): string => {
+		if (c.kind === "line") return "line";
+		if (c.kind === "file") return "file";
+		return "all ";
 	};
 
 	if (mode.kind === "view") {
@@ -533,47 +528,40 @@ export function Manager(props: ManagerProps): React.JSX.Element {
 		<Box flexDirection="column" paddingX={1}>
 			{/* Header */}
 			<Box marginBottom={1}>
-				<Text>
-					<Text bold color={ACCENT}>◆ pi-diff</Text>
-					<Text color={MUTED}>  ·  </Text>
-					<Text bold>{items.length}</Text>
-					<Text color={MUTED}> comment{items.length === 1 ? "" : "s"}  ·  output: </Text>
-					<Text bold color={ACCENT}>{settings.output}</Text>
-				</Text>
+				<Text bold>pi-diff</Text>
+				<Text dimColor>  ·  {items.length} comment{items.length === 1 ? "" : "s"}  ·  output {settings.output}</Text>
 			</Box>
 
 			{/* Item list */}
 			{items.length === 0 ? (
 				<Box paddingY={1}>
-					<Text color={MUTED}>(empty queue — press </Text>
-					<Text color={ACCENT}>q</Text>
-					<Text color={MUTED}> to exit)</Text>
+					<Text dimColor>(empty queue — press q to exit)</Text>
 				</Box>
 			) : (
 				<Box flexDirection="column">
 					{items.map((it, i) => {
 						const active = i === safeCursor;
-						const kind = kindFor(it.comment);
+						const kind = kindLabel(it.comment);
 						const loc = locationFor(it.comment);
 						const summary = summarize(it.comment.text, 56);
 						return (
 							<Box key={it.comment.id}>
 								<Box width={2}>
-									<Text color={active ? ACCENT : MUTED}>{active ? "❯" : " "}</Text>
+									<Text>{active ? "❯" : " "}</Text>
 								</Box>
 								<Box width={3}>
-									<Text color={MUTED}>{String(i + 1).padStart(2)}.</Text>
+									<Text dimColor>{String(i + 1).padStart(2)}.</Text>
 								</Box>
 								<Box width={6}>
-									<Text color={kind.color}>{kind.label}</Text>
+									<Text dimColor>{kind}</Text>
 								</Box>
 								<Box width={32}>
-									<Text color={active ? "white" : undefined} bold={active}>{loc}</Text>
+									<Text bold={active} dimColor={!active}>{loc}</Text>
 								</Box>
 								<Box flexGrow={1}>
-									<Text color={active ? undefined : MUTED}>{summary}</Text>
+									<Text dimColor={!active}>{summary}</Text>
 								</Box>
-								{it.lastError ? <Text color={DANGER}>  (failed)</Text> : null}
+								{it.lastError ? <Text color="red">  (failed)</Text> : null}
 							</Box>
 						);
 					})}
@@ -584,34 +572,26 @@ export function Manager(props: ManagerProps): React.JSX.Element {
 			<Box marginTop={1} flexDirection="column">
 				{mode.kind === "results" ? (
 					<>
-						<Text bold color={ACCENT}>submission results</Text>
+						<Text bold>submission results</Text>
 						{mode.created.map((r, i) => (
 							<Box key={i}>
-								<Text color={r.id ? SUCCESS : DANGER}>{r.id ? "  ✓ " : "  ✗ "}</Text>
-								<Text>{r.id ? `${r.id}  ${r.title}` : `${r.title}`}</Text>
-								{!r.id ? <Text color={MUTED}> — {r.error ?? "unknown"}</Text> : null}
+								<Text>{r.id ? "  ✓ " : "  ✗ "}</Text>
+								<Text>{r.id ? `${r.id}  ${r.title}` : r.title}</Text>
+								{!r.id ? <Text dimColor> — {r.error ?? "unknown"}</Text> : null}
 							</Box>
 						))}
 						<Box marginTop={1}>
-							<Text color={MUTED}>press any key to return</Text>
+							<Text dimColor>(any key to return)</Text>
 						</Box>
 					</>
 				) : mode.kind === "confirmClear" ? (
-					<Text>
-						<Text color={DANGER}>! </Text>
-						clear all <Text bold>{items.length}</Text> item(s)? [<Text bold color={ACCENT}>y</Text>/N]
-					</Text>
+					<Text>clear all <Text bold>{items.length}</Text> item(s)? [<Text bold>y</Text>/N]</Text>
 				) : mode.kind === "confirmQuit" ? (
-					<Text>
-						<Text color={DANGER}>! </Text>
-						discard <Text bold>{items.length}</Text> item(s)? [<Text bold color={ACCENT}>y</Text>/N]
-					</Text>
+					<Text>discard <Text bold>{items.length}</Text> item(s)? [<Text bold>y</Text>/N]</Text>
 				) : (
 					<>
-						<Text color={MUTED}>
-							<Text color={ACCENT}>↑↓</Text> nav  ·  <Text color={ACCENT}>↵</Text> view  ·  <Text color={ACCENT}>e</Text> edit  ·  <Text color={ACCENT}>d</Text> delete  ·  <Text color={ACCENT}>s</Text> submit  ·  <Text color={ACCENT}>c</Text> clear  ·  <Text color={ACCENT}>q</Text> quit
-						</Text>
-						{error ? <Text color={DANGER}>{error}</Text> : null}
+						<Text dimColor>↑↓ nav  ·  ↵ view  ·  e edit  ·  d delete  ·  s submit  ·  c clear  ·  q quit</Text>
+						{error ? <Text color="red">{error}</Text> : null}
 					</>
 				)}
 			</Box>
