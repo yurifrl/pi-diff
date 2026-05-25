@@ -1,0 +1,122 @@
+name: release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to build (e.g. v0.1.0)"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: build (${{ matrix.target }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: darwin-arm64
+            runner: macos-14
+            bun-target: bun-darwin-arm64
+          - target: darwin-x64
+            runner: macos-13
+            bun-target: bun-darwin-x64
+          - target: linux-x64
+            runner: ubuntu-latest
+            bun-target: bun-linux-x64
+          - target: linux-arm64
+            runner: ubuntu-24.04-arm
+            bun-target: bun-linux-arm64
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        run: bun install --no-save
+
+      - name: Build web assets
+        run: bun run scripts/build-web.mjs
+
+      - name: Compile binary
+        run: |
+          bun scripts/build-binary.ts \
+            "$PWD/pi-diff-${{ matrix.target }}" \
+            "${{ matrix.bun-target }}"
+          chmod +x "pi-diff-${{ matrix.target }}"
+
+      - name: Smoke test (--help) on native runners
+        if: matrix.target == 'darwin-arm64' || matrix.target == 'linux-x64' || matrix.target == 'darwin-x64' || matrix.target == 'linux-arm64'
+        run: ./pi-diff-${{ matrix.target }} --help
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pi-diff-${{ matrix.target }}
+          path: pi-diff-${{ matrix.target }}
+          if-no-files-found: error
+
+  release:
+    name: release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          pattern: pi-diff-*
+
+      - name: Flatten artifacts and compute checksums
+        run: |
+          set -euo pipefail
+          cd artifacts
+          for d in pi-diff-*; do
+            if [ -d "$d" ]; then
+              mv "$d"/* .
+              rmdir "$d"
+            fi
+          done
+          for f in pi-diff-*; do
+            shasum -a 256 "$f" > "$f.sha256"
+          done
+          shasum -a 256 pi-diff-darwin-arm64 pi-diff-darwin-x64 pi-diff-linux-x64 pi-diff-linux-arm64 > SHA256SUMS
+          ls -la
+
+      - name: Resolve tag name
+        id: tag
+        run: |
+          if [ -n "${{ github.event.inputs.tag }}" ]; then
+            echo "name=${{ github.event.inputs.tag }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "name=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.tag.outputs.name }}
+          name: ${{ steps.tag.outputs.name }}
+          files: |
+            artifacts/pi-diff-darwin-arm64
+            artifacts/pi-diff-darwin-x64
+            artifacts/pi-diff-linux-x64
+            artifacts/pi-diff-linux-arm64
+            artifacts/pi-diff-darwin-arm64.sha256
+            artifacts/pi-diff-darwin-x64.sha256
+            artifacts/pi-diff-linux-x64.sha256
+            artifacts/pi-diff-linux-arm64.sha256
+            artifacts/SHA256SUMS
+          generate_release_notes: true
+          draft: false
+          prerelease: false

@@ -12,22 +12,29 @@
       "./index.ts"
     ]
   },
+  "bin": {
+    "pi-diff": "./dist/cli.js"
+  },
   "peerDependencies": {
     "@earendil-works/pi-coding-agent": ">=0.74.0"
   },
   "dependencies": {
+    "@inkjs/ui": "^2.0.0",
     "esbuild": "^0.28.0",
+    "ink": "^7.0.3",
     "react": "^19.2.4",
     "react-diff-view": "^3.3.3",
     "react-dom": "^19.2.4"
   },
   "devDependencies": {
     "@earendil-works/pi-coding-agent": "^0.74.0",
+    "@types/react": "^19.2.15",
     "typescript": "^5.5.0",
     "vitest": "^4.0.14"
   },
   "scripts": {
-    "build": "node ./scripts/build-web.mjs",
+    "build": "node ./scripts/build-web.mjs && npm run build:ts",
+    "build:ts": "tsc -p tsconfig.json && node -e \"require('fs').chmodSync('dist/cli.js', 0o755)\"",
     "test": "vitest run tests/*.test.ts"
   }
 }

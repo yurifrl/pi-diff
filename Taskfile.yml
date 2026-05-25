@@ -1,0 +1,107 @@
+version: "3"
+
+vars:
+  REPO: yurifrl/pi-diff
+  BIN_NAME: pi-diff
+
+env:
+  BIN_DIR:
+    sh: echo "{{.TASKFILE_DIR}}/node_modules/.bin"
+
+tasks:
+  default:
+    desc: List available tasks
+    cmds:
+      - task --list
+
+  install:
+    desc: Install npm dependencies
+    cmds:
+      - npm install
+
+  build:web:
+    desc: Bundle the web viewer (web/dist/app.js + app.css)
+    sources:
+      - web/**/*
+      - scripts/build-web.mjs
+    generates:
+      - web/dist/app.js
+      - web/dist/app.css
+    cmds:
+      - node ./scripts/build-web.mjs
+
+  build:ts:
+    desc: Compile TypeScript to dist/
+    deps: [build:web]
+    sources:
+      - core/**/*.ts
+      - cli/**/*.tsx
+      - cli.ts
+      - index.ts
+      - tsconfig.json
+    generates:
+      - dist/cli.js
+    cmds:
+      - $BIN_DIR/tsc -p tsconfig.json
+      - node -e "require('fs').chmodSync('dist/cli.js', 0o755)"
+
+  build:
+    desc: Full build (web bundle + TypeScript)
+    deps: [build:ts]
+
+  build:binary:
+    desc: Build a Bun-compiled single-file binary for the current platform
+    deps: [build:web]
+    cmds:
+      - bun scripts/build-binary.ts ./{{.BIN_NAME}}
+      - chmod +x ./{{.BIN_NAME}}
+      - "echo 'built ./{{.BIN_NAME}}'"
+
+  test:
+    desc: Run vitest test suite
+    cmds:
+      - $BIN_DIR/vitest run tests/*.test.ts
+
+  test:watch:
+    desc: Run vitest in watch mode
+    cmds:
+      - $BIN_DIR/vitest tests/*.test.ts
+
+  clean:
+    desc: Remove build artifacts
+    cmds:
+      - rm -rf dist web/dist {{.BIN_NAME}} {{.BIN_NAME}}-*
+
+  dev:
+    desc: Run the CLI directly via tsx (no rebuild needed)
+    cmds:
+      - npx tsx cli.ts {{.CLI_ARGS}}
+
+  install:local:
+    desc: Build a binary and symlink it into ~/.local/bin
+    deps: [build:binary]
+    cmds:
+      - mkdir -p $HOME/.local/bin
+      - cp ./{{.BIN_NAME}} $HOME/.local/bin/{{.BIN_NAME}}
+      - chmod +x $HOME/.local/bin/{{.BIN_NAME}}
+      - "echo 'installed → ~/.local/bin/{{.BIN_NAME}} (ensure that is on your PATH)'"
+
+  release:tag:
+    desc: "Cut a release: task release:tag VERSION=v0.1.0"
+    preconditions:
+      - sh: "test -n '{{.VERSION}}'"
+        msg: "VERSION is required (e.g. task release:tag VERSION=v0.1.0)"
+      - sh: "git diff --quiet && git diff --cached --quiet"
+        msg: "working tree must be clean"
+    cmds:
+      - "git tag {{.VERSION}}"
+      - "echo 'tagged {{.VERSION}}. Push with: git push origin {{.VERSION}}'"
+
+  release:push:
+    desc: "Push a release tag: task release:push VERSION=v0.1.0"
+    preconditions:
+      - sh: "test -n '{{.VERSION}}'"
+        msg: "VERSION is required"
+    cmds:
+      - "git push origin {{.VERSION}}"
+      - "echo 'pushed {{.VERSION}}. Watch: https://github.com/{{.REPO}}/actions'"
