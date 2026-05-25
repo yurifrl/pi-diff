@@ -1,6 +1,29 @@
 # pi-diff
 
-GitHub-style diff review for pi. Open a unified or split diff in the browser of your choice, comment on lines/files/PR overall, and either drop the feedback into your prompt editor or emit ready-to-run [beads](https://github.com/anthropics/beads) `bd create` commands so each comment becomes a tracked task.
+> GitHub-style diff review for the terminal. Open any diff (uncommitted / branch / commit) in a real browser, comment line-by-line, then dump the feedback into your prompt or turn each comment into a [beads](https://github.com/gastownhall/beads) task — all from one binary.
+
+Same code ships two ways:
+
+- **Standalone CLI** (`pi-diff`) — Bun-compiled single binary, no Node required.
+- **pi extension** — registers `/diff`, `/diff-settings`, `/diff-backups` inside [pi](https://github.com/earendil-works/pi-coding-agent).
+
+---
+
+## Screenshots
+
+### 1. Browser viewer — line/file/overall comments, unified/split, search, sidebar
+
+![diff viewer](docs/img/diff-viewer.png)
+
+### 2. CLI Phase A — live counter while comments stream in from the browser
+
+![phase A: waiting](docs/img/phase-a-waiting.png)
+
+### 3. CLI Phase B — Ink-based TUI manager: navigate, edit, delete, submit
+
+![phase B: manager](docs/img/phase-b-manager.png)
+
+---
 
 ## Install
 
@@ -8,56 +31,96 @@ GitHub-style diff review for pi. Open a unified or split diff in the browser of 
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/yurifrl/pi-diff/main/install.sh | bash
-# or pin a version
+# or pin a version:
 curl -fsSL https://raw.githubusercontent.com/yurifrl/pi-diff/main/install.sh | bash -s -- --version v0.1.0
 ```
 
-Manual download: grab the right asset for your OS/arch from the [Releases page](https://github.com/yurifrl/pi-diff/releases) and put it on your `PATH`. Verify it with the matching `.sha256` (or against `SHA256SUMS`).
+The script auto-detects `darwin`/`linux` × `arm64`/`x64`, downloads the matching binary from [Releases](https://github.com/yurifrl/pi-diff/releases), verifies its `.sha256`, and drops it in `/usr/local/bin` (or `~/.local/bin` if you don't have sudo). Manual download from the releases page works too.
 
-### From source (dev)
+### From source
 
-This repo uses [Task](https://taskfile.dev) for build scripts (`brew install go-task`).
+This repo uses [Task](https://taskfile.dev) (`brew install go-task`).
 
 ```bash
 git clone https://github.com/yurifrl/pi-diff.git
 cd pi-diff
-task install            # npm install
-task build              # web bundle + tsc
-task test               # vitest (93 tests)
-task build:binary       # bun-compiled single-file binary at ./pi-diff
-task install:local      # copies the binary into ~/.local/bin
-task dev -- uncommitted # run the CLI from source via tsx, no rebuild
+task install         # npm install
+task build           # web bundle + tsc
+task test            # vitest (93 tests)
+task build:binary    # bun-compiled single-file binary at ./pi-diff
+task install:local   # copies the binary into ~/.local/bin
 ```
 
-The full task list is `task --list`.
+`task --list` shows everything available. `task dev -- <args>` runs the CLI from source via `tsx` with no rebuild.
+
+---
+
+## Quickstart (CLI)
+
+```bash
+pi-diff                              # interactive target picker
+pi-diff uncommitted                  # working tree vs HEAD
+pi-diff branch main                  # merge-base of main vs HEAD
+pi-diff commit abc123                # commit vs its parent
+pi-diff commit abc123 --output beads # one-off override
+```
+
+The flow:
+
+1. Pick a target (or pass it on the CLI).
+2. CLI starts a localhost HTTP server, opens the viewer (`cmux` pane / system browser / nothing — your choice).
+3. **Comment in the browser.** Click any line, write feedback, send. Submit as many batches as you like — the CLI counter ticks up live.
+4. **Click `Done`** in the viewer (or just close the tab — `beforeunload` is wired). The CLI flips to the manager.
+5. **In the terminal:** `↑↓` to navigate, `enter` to view, `e` to edit (opens `$EDITOR`), `d` to delete, `s` to submit all, `q` to quit.
+
+Output depends on `--output` (default: `prompt`):
+
+- **`prompt`** — formatted comment block printed to stdout under a `--- pi-diff comments ---` header. Pipe it wherever.
+- **`beads`** — runs `bd create` per item; prints the resulting `bd-XXXX` IDs.
+- **`beads-script`** — emits the `bd create …` script for later use.
+
+Failed beads stay in the queue with `(failed: …)` so you can `e` to fix and retry.
+
+### Main-flow flags (override settings for this run, not persisted)
+
+| Flag | Values | Effect |
+|------|--------|--------|
+| `--viewer` | `cmux`, `browser`, `none` | Where to open the URL |
+| `--output` | `prompt`, `beads`, `beads-script` | How comments are emitted |
+| `--cwd <path>` | | Run as if from `<path>` |
+| `--no-open` | | Print the URL only, don't open anything |
+| `--auto-submit` | | Skip the manager TUI; first browser submit is processed and CLI exits |
+
+---
 
 ## Use as a pi extension
 
-The same code is also a [pi](https://github.com/earendil-works/pi-coding-agent) extension. When loaded by pi it registers three slash commands:
+The same package, loaded by pi, registers three slash commands:
 
-- `/diff` — open the diff viewer for a chosen target (uncommitted / branch / commit)
-- `/diff-settings` — show or update settings (`viewer`, `output`, `beads*`, …)
-- `/diff-backups list` — list past comment-send backups
+- `/diff [target]` — open the diff viewer
+- `/diff-settings [show|set …]` — show or update settings
+- `/diff-backups list` — past comment-send backups
 
 ### Install into pi
 
+From a clone (recommended):
+
 ```bash
-# from a clone (recommended for now — installs everything pi needs in one step)
 cd /path/to/pi-diff
-task install            # npm install (also pulls react, ink, esbuild, react-diff-view)
-task build              # produces dist/ and web/dist/ that index.ts depends on
+task install        # npm install
+task build          # builds dist/ and web/dist/ that index.ts depends on
 ```
 
-Then point your pi config at this directory. In `~/.pi/config.toml` (or whichever pi config you use), add:
+Then point pi at this directory. In `~/.pi/config.toml`:
 
 ```toml
 [[extensions]]
 path = "/absolute/path/to/pi-diff"
 ```
 
-pi will read `package.json#pi.extensions` (`./index.ts`) and load it natively (pi loads `.ts` extensions directly — no compile step required for the extension entry, though you do need the bundled `web/dist/` for the viewer to render).
+pi reads `package.json#pi.extensions` (`./index.ts`) and loads `.ts` natively — no compile step needed for the extension entry, but you do need the bundled `web/dist/` for the viewer to render, hence `task build`.
 
-Alternatively, drop a symlink under `~/.pi/agent/npm/node_modules/`:
+Alternative: symlink under pi's npm tree:
 
 ```bash
 mkdir -p ~/.pi/agent/npm/node_modules
@@ -66,157 +129,126 @@ ln -s "$(pwd)" ~/.pi/agent/npm/node_modules/pi-diff
 
 ### Verify
 
-Open pi in any git repo and run `/diff`. The settings command also works as a quick smoke test:
+Open pi in any git repo and run `/diff`. Quick smoke test:
 
 ```
 /diff-settings show
 ```
 
-Settings live in two layers — `~/.pi/agent/extensions/pi-diff.json` (global) and `<repo>/.pi/extensions/pi-diff.json` (project, overrides global). Both accept JSONC.
+The extension and the standalone CLI share the same `core/` library, so any setting (output mode, beads command, etc.) applies identically to both.
 
-The extension and the standalone CLI share the same `core/` library, so any behavior you configure (output mode, beads command, etc.) applies identically to both.
-
-## Commands
-
-- `/diff [target]` — opens the diff viewer using the viewer configured in settings.
-- `/diff-settings` — show or update settings (see below).
-
-### Targets
-
-- `uncommitted`
-- `branch <name>`
-- `commit <sha>`
-
-If you omit args, the extension shows an interactive target picker.
-
-Examples:
-
-- `/diff uncommitted`
-- `/diff branch main`
-- `/diff commit abc123`
-
-## Viewer behavior
-
-- Continuous changed-files stream, similar to GitHub's changed-files view.
-- Collapsible grouped-path sidebar with fuzzy search, status markers, comment badges, reviewed indicators.
-- Unified/split toggle and wrap toggle.
-- Line, file, and overall comments.
-- Manual reviewed/unreviewed tracking persisted in browser storage per viewer token.
-- Send individual comments from each draft textarea, use Cmd+Enter on macOS or Ctrl+Enter elsewhere, or send all unsent comments at once.
+---
 
 ## Settings
 
-Settings live in:
+Two layers, both JSONC:
 
 - Global: `~/.pi/agent/extensions/pi-diff.json`
 - Project (overrides global): `<repo>/.pi/extensions/pi-diff.json`
-
-Both files accept JSONC (comments + trailing commas).
-
-Example `pi-diff.json`:
 
 ```jsonc
 {
   "viewer": "cmux",        // "cmux" | "browser" | "none"
   "cmuxMode": "pane",      // "pane" | "surface"
-  "defaultViewMode": "unified",
-  "output": "beads",       // "prompt" | "beads"
+  "defaultViewMode": "unified", // "unified" | "split"
+  "output": "beads",       // "prompt" | "beads" | "beads-script"
   "beadsCommand": "bd",
   "beadsType": "task",
   "beadsLabels": ["code-review"],
-  "beadsPriority": null
+  "beadsPriority": null    // 0–4 or null
 }
 ```
 
-| Key                | Values                                | Default     | Notes |
-| ------------------ | ------------------------------------- | ----------- | ----- |
-| `viewer`           | `cmux`, `browser`, `none`             | `browser`   | Where to open the diff URL |
-| `cmuxMode`         | `pane`, `surface`                     | `pane`      | Only used when `viewer = cmux` |
-| `defaultViewMode`  | `unified`, `split`                    | `unified`   | Initial layout of the viewer |
-| `output`           | `prompt`, `beads`                     | `prompt`    | How review comments are emitted |
-| `beadsCommand`     | string                                | `bd`        | CLI used in the generated commands |
-| `beadsType`        | string                                | `task`      | Passed to `--type` |
-| `beadsLabels`      | comma list (string)                   | `code-review` | Passed to `--labels` |
-| `beadsPriority`    | number or `null`                      | `null`      | Passed to `--priority` if set |
+| Key | Values | Default | Notes |
+|---|---|---|---|
+| `viewer` | `cmux` / `browser` / `none` | `browser` | Where to open the diff URL |
+| `cmuxMode` | `pane` / `surface` | `pane` | Only when `viewer = cmux` |
+| `defaultViewMode` | `unified` / `split` | `unified` | Initial layout of the viewer |
+| `output` | `prompt` / `beads` / `beads-script` | `prompt` | How review comments are emitted |
+| `beadsCommand` | string | `bd` | CLI used to create beads |
+| `beadsType` | string | `task` | Passed to `--type` |
+| `beadsLabels` | string[] | `["code-review"]` | Passed to `--labels` |
+| `beadsPriority` | number / `null` | `null` | Passed to `--priority` if set |
 
-### Show or update from inside pi
-
-```
-/diff-settings                          # show
-/diff-settings viewer cmux              # save globally
-/diff-settings --project output beads   # save in project
-/diff-settings beadsLabels review,frontend
-/diff-settings beadsPriority 2
-/diff-settings beadsPriority null
-```
-
-## Output modes
-
-- `prompt` (default): comments are formatted into a compact "Please address the following feedback" block and appended to your editor.
-- `beads`: each comment is created **directly as a bead** by shelling out to `bd create --stdin --silent` (one process per comment). Title comes from the comment summary + location, description includes source target, location, excerpt, and full text. Labels, type, and priority come from settings. The list of created bead IDs is appended to the editor. If the `bd` binary is not on PATH, the extension falls back to `beads-script` and shows an error.
-- `beads-script`: emits a script of `bd create …` commands, one per comment, appended to the editor (no execution). Useful when you want to review/edit the commands before running them, or when the agent is on a host without `bd`.
-
-Example direct-creation summary:
+### From inside pi
 
 ```
-Created 2 bead(s):
-  bd-12345  foo.ts:42 fix nil deref
-  bd-12346  consider extracting helper
+/diff-settings show
+/diff-settings set viewer cmux
+/diff-settings set --project output beads
+/diff-settings set beadsLabels review,frontend
+/diff-settings set beadsPriority 2
+/diff-settings set beadsPriority null
 ```
 
-## cmux
-
-cmux is one of three viewer backends. When `viewer = cmux`, the extension uses `cmux identify` to find the current workspace and opens the diff in either a new browser pane (`cmuxMode = pane`) or a browser surface in the active pane (`cmuxMode = surface`). With `viewer = browser` or `viewer = none`, cmux is not required.
-
-## CLI usage
-
-The same review flow is available as a standalone CLI (`pi-diff`), independent
-of the pi extension.
-
-Install (one of):
+### From the CLI
 
 ```bash
-npm i -g pi-diff
-# or, from a checkout:
-npm run build && node dist/cli.js --help
-```
-
-Examples:
-
-```bash
-pi-diff                                 # interactive target picker
-pi-diff uncommitted                     # working tree vs HEAD
-pi-diff branch main                     # merge-base of main vs HEAD
-pi-diff commit abc123 --output beads    # one-off override of output mode
 pi-diff settings show
 pi-diff settings set output beads
 pi-diff settings set --project viewer browser
-pi-diff backups list
 ```
 
-Flags for the main flow (override settings for this run only, never persisted):
-`--viewer cmux|browser|none`, `--output prompt|beads|beads-script`,
-`--cwd <path>`, `--no-open` (just print the URL).
+---
 
-End-of-flow behavior mirrors the extension:
+## How beads creation works
 
-- `prompt` (default) — the formatted comment block is printed to stdout under
-  a `--- pi-diff comments ---` header. Pipe it into your editor or the agent
-  of your choice.
-- `beads` — prints a numbered summary, then asks `Create N bead(s)? [y/N]`.
-  On `y`, runs `bd create` for each comment and prints the resulting bead IDs.
-  On `n`, emits the equivalent `bd create` script you can run later.
-- `beads-script` — always emits the script, never executes `bd`.
+In `beads` mode, each comment becomes one `bd create --stdin --silent` invocation. A line comment like `core/git.ts:42 — "check for nil"` produces:
 
-All runs append to the same `~/.pi/agent/sessions/_ephemeral/*.pi-diff.json`
-backup that `pi-diff backups list` reads.
+```
+○ pi-diff-xyz  ·  core/git.ts:42 check for nil   [● P2 · OPEN]
+DESCRIPTION
+Source: uncommitted
+Location: ./core/git.ts:42 (new)
 
-## Local development
+Excerpt:
+  const foo = bar();
+
+check for nil
+
+LABELS: code-review
+```
+
+Title, location, excerpt, and source target are filled in automatically. You can override per-item title / labels / type / priority by pressing `e` in the manager TUI.
+
+---
+
+## cmux
+
+When `viewer = cmux`, the CLI uses `cmux identify` to find the current workspace and opens the diff in either a new browser pane (`cmuxMode = pane`) or a browser surface in the active pane (`cmuxMode = surface`). With `viewer = browser` or `viewer = none`, cmux is not required.
+
+---
+
+## Architecture
+
+```
+pi-diff/
+├── core/        # runtime-agnostic library (no pi imports, takes an injected Exec)
+├── cli/         # Ink TUI components (target picker, waiting, manager)
+├── web/         # browser viewer (React + react-diff-view)
+├── cli.ts       # standalone CLI entrypoint → bun-compiled to single binary
+├── index.ts     # pi extension entrypoint (thin adapter over core/)
+└── scripts/
+    ├── build-web.mjs       # esbuild for the web bundle
+    └── build-binary.ts     # bun --compile wrapper
+```
+
+`core/` is shared between `index.ts` (pi extension) and `cli.ts` (standalone). Tests are in `tests/`, vitest, 93 of them.
+
+---
+
+## Releases
+
+Tag → GitHub Actions → release with prebuilt binaries (darwin arm64/x64, linux x64/arm64) plus per-binary `.sha256` and a combined `SHA256SUMS`. Workflow lives in `.github/workflows/release.yml`.
 
 ```bash
-pnpm install
-pnpm run build
-pnpm test
+task release:tag VERSION=v0.1.0
+task release:push VERSION=v0.1.0
+# watch https://github.com/yurifrl/pi-diff/actions
 ```
 
-To load locally, symlink this directory into `~/.pi/agent/extensions/pi-diff` and run `/reload` in pi.
+---
+
+## License
+
+MIT.
