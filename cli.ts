@@ -6,6 +6,8 @@ import { appendAttempt, formatBackupSummary, listBackupFiles, readBackup, summar
 import { createBeadsForComments, isBeadsAvailable, isBeadsRepoConfigured, summarizeCreated, type CreatedBead } from "./core/bd-client.js";
 import { formatCommentsAsBeadsScript } from "./core/beads.js";
 import { formatCommentsForEditor } from "./core/comments.js";
+import { getVersionInfo } from "./core/version.js";
+const __versionInfo = getVersionInfo();
 import type { Exec, ExecOptions, ExecResult } from "./core/exec.js";
 import { buildDiffViewerData, hasWorkingTreeChanges, isGitRepository } from "./core/git.js";
 import { handleSendComments, isBeadsOutputMode } from "./core/handle-send.js";
@@ -73,6 +75,7 @@ type MainFlags = {
 
 type ParsedArgs =
 	| { kind: "help" }
+	| { kind: "version" }
 	| { kind: "main"; targetTokens: string[]; flags: MainFlags }
 	| { kind: "settings-show" }
 	| { kind: "settings-set"; key: string; value: string; location: SettingsLocation }
@@ -83,6 +86,7 @@ function parseArgv(argv: string[]): ParsedArgs {
 	const args = argv.slice();
 	if (args.length === 0) return { kind: "main", targetTokens: [], flags: {} };
 	if (args[0] === "-h" || args[0] === "--help") return { kind: "help" };
+	if (args[0] === "-V" || args[0] === "--version" || args[0] === "version") return { kind: "version" };
 
 	if (args[0] === "settings") {
 		const sub = args[1] ?? "show";
@@ -141,6 +145,7 @@ USAGE:
   pi-diff settings set [--project|--global] <key> <value>
   pi-diff backups list
   pi-diff --help
+  pi-diff --version
 
 TARGETS:
   uncommitted                   working tree vs HEAD
@@ -198,6 +203,7 @@ function buildSettingsPatch(key: string, value: string): Partial<DiffSettings> {
 		case "viewer": return coerceSettings({ viewer: v });
 		case "cmuxMode": return coerceSettings({ cmuxMode: v });
 		case "defaultViewMode": return coerceSettings({ defaultViewMode: v });
+		case "layoutMode": return coerceSettings({ layoutMode: v });
 		case "output": return coerceSettings({ output: v });
 		case "beadsCommand": return coerceSettings({ beadsCommand: v });
 		case "beadsType": return coerceSettings({ beadsType: v });
@@ -465,8 +471,11 @@ async function runMain(targetTokens: string[], flags: MainFlags): Promise<number
 			target: viewerData.target,
 			files: viewerData.files,
 			defaultViewMode: settings.defaultViewMode,
+			defaultLayoutMode: settings.layoutMode,
 			beadsEnabled: isBeadsOutputMode(settings.output),
 			beadsConfigured: isBeadsRepoConfigured(cwd),
+			buildVersion: __versionInfo.display,
+			buildKind: __versionInfo.buildKind,
 		},
 		loadFile: async (fileId) => viewerData.filePayloads.get(fileId) ?? null,
 		sendComments: async (comments: DiffComment[]): Promise<SendCommentsResponse> => {
@@ -547,6 +556,11 @@ async function main(): Promise<number> {
 		case "help":
 			process.stdout.write(HELP_TEXT);
 			return 0;
+		case "version": {
+			const v = getVersionInfo();
+			process.stdout.write(`pi-diff ${v.display}\n`);
+			return 0;
+		}
 		case "error":
 			console.error(`pi-diff: ${parsed.message}`);
 			return 2;

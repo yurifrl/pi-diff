@@ -9,6 +9,7 @@ import type { Exec } from "./core/exec.js";
 import { buildDiffViewerData, isGitRepository } from "./core/git.js";
 import { handleSendComments, isBeadsOutputMode } from "./core/handle-send.js";
 import { createDiffServer, type DiffServer } from "./core/server.js";
+import { getVersionInfo } from "./core/version.js";
 import {
 	type DiffSettings,
 	type SettingsLocation,
@@ -108,8 +109,11 @@ async function runDiffCommand(exec: Exec, server: { instance: DiffServer | null 
 			target: viewerData.target,
 			files: viewerData.files,
 			defaultViewMode: currentSettings.defaultViewMode,
+			defaultLayoutMode: currentSettings.layoutMode,
 			beadsEnabled: isBeadsOutputMode(currentSettings.output),
 			beadsConfigured: isBeadsRepoConfigured(ctx.cwd),
+			buildVersion: getVersionInfo().display,
+			buildKind: getVersionInfo().buildKind,
 		});
 
 		if (!server.instance) server.instance = createDiffServer();
@@ -199,6 +203,8 @@ function buildSettingsPatch(key: string, value: string): Partial<DiffSettings> {
 			return coerceSettings({ cmuxMode: lower });
 		case "defaultViewMode":
 			return coerceSettings({ defaultViewMode: lower });
+		case "layoutMode":
+			return coerceSettings({ layoutMode: lower });
 		case "output":
 			return coerceSettings({ output: lower });
 		case "beadsCommand":

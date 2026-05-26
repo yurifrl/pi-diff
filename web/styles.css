@@ -892,3 +892,140 @@ textarea {
 		pointer-events: auto;
 	}
 }
+
+/* ---------- Deck layout (one file at a time) ---------- */
+
+.app-layout--deck {
+	grid-template-columns: minmax(0, 1fr);
+}
+
+.app-layout--deck .sidebar {
+	display: none;
+}
+
+.app-layout--deck .file-stream {
+	display: flex;
+	flex-direction: column;
+	align-items: stretch;
+	max-width: 1080px;
+	margin: 0 auto;
+	width: 100%;
+}
+
+.deck-progress {
+	padding: 14px 18px 6px;
+	display: flex;
+	flex-direction: column;
+	gap: 6px;
+}
+
+.deck-progress__track {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+}
+
+.deck-progress__bar {
+	flex: 1;
+	height: 6px;
+	background: #21262d;
+	border-radius: 3px;
+	overflow: hidden;
+}
+
+.deck-progress__fill {
+	height: 100%;
+	background: linear-gradient(90deg, #58a6ff, #1f6feb);
+	transition: width 160ms ease-out;
+}
+
+.deck-progress__label {
+	font-size: 11px;
+	letter-spacing: 0.08em;
+	text-transform: uppercase;
+	color: #8b949e;
+}
+
+.deck-progress__meta {
+	display: flex;
+	justify-content: space-between;
+	font-size: 12px;
+	color: #8b949e;
+}
+
+.deck-progress__meta strong {
+	color: #c9d1d9;
+	font-weight: 600;
+}
+
+.deck-progress__path {
+	font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+	color: #8b949e;
+	max-width: 60%;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.deck-nav {
+	display: flex;
+	justify-content: center;
+	gap: 12px;
+	padding: 18px 0 28px;
+}
+
+.deck-nav__btn {
+	min-width: 64px;
+	padding: 10px 14px;
+	background: #161b22;
+	border: 1px solid #30363d;
+	border-radius: 8px;
+	color: #c9d1d9;
+	font-size: 16px;
+	cursor: pointer;
+	transition: background 120ms ease, border-color 120ms ease;
+}
+
+.deck-nav__btn:hover:not(:disabled) {
+	background: #21262d;
+	border-color: #484f58;
+}
+
+.deck-nav__btn:disabled {
+	opacity: 0.35;
+	cursor: not-allowed;
+}
+
+/* ---------- Build chip (release / dev marker in toolbar) ---------- */
+
+.toolbar__eyebrow {
+	display: inline-flex;
+	align-items: center;
+	gap: 8px;
+}
+
+.build-chip {
+	display: inline-flex;
+	align-items: center;
+	gap: 4px;
+	padding: 1px 6px;
+	font-size: 10px;
+	font-weight: 600;
+	letter-spacing: 0.04em;
+	font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+	border-radius: 3px;
+	border: 1px solid transparent;
+	white-space: nowrap;
+}
+
+.build-chip--release {
+	color: #58a6ff;
+	border-color: #1f6feb55;
+	background: #1f6feb22;
+}
+
+.build-chip--dev {
+	color: #f0b72f;
+	border-color: #f0b72f55;
+	background: #f0b72f22;
+}

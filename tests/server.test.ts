@@ -24,6 +24,9 @@ const bootstrap = {
 		},
 	],
 	defaultViewMode: "unified" as const,
+	defaultLayoutMode: "stream" as const,
+	buildVersion: "0.0.0-test" as const,
+	buildKind: "dev" as const,
 };
 
 const COMMENTS: DiffComment[] = [

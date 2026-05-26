@@ -1,11 +1,14 @@
 import React from "react";
-import type { DiffViewMode } from "../../types";
+import type { DiffLayoutMode, DiffViewMode } from "../../types";
 import { getSendAllHint } from "../shortcuts";
 
 type ToolbarProps = {
 	repoName: string;
 	targetLabel: string;
+	buildVersion: string;
+	buildKind: "release" | "dev";
 	viewMode: DiffViewMode;
+	layoutMode: DiffLayoutMode;
 	wrapLines: boolean;
 	unsentCount: number;
 	expired: boolean;
@@ -13,6 +16,7 @@ type ToolbarProps = {
 	beadsConfigured: boolean;
 	beadsToggleBusy: boolean;
 	onViewModeChange: (mode: DiffViewMode) => void;
+	onLayoutModeChange: (mode: DiffLayoutMode) => void;
 	onWrapToggle: () => void;
 	onToggleBeads: () => void;
 	onToggleSidebarPopover: () => void;
@@ -49,7 +53,15 @@ export function Toolbar(props: ToolbarProps) {
 					<span className="shortcut-chip shortcut-chip--overlay">R</span>
 				</button>
 				<div className="toolbar__title">
-					<div className="toolbar__eyebrow">{props.repoName}</div>
+					<div className="toolbar__eyebrow">
+						{props.repoName}
+						<span
+							className={`build-chip build-chip--${props.buildKind}`}
+							title={`pi-diff ${props.buildVersion}`}
+						>
+							{props.buildKind === "dev" ? "DEV" : "v"} {props.buildVersion}
+						</span>
+					</div>
 					<div className="toolbar__label">{props.targetLabel}</div>
 				</div>
 			</div>
@@ -84,6 +96,14 @@ export function Toolbar(props: ToolbarProps) {
 					</button>
 					<button className={props.viewMode === "split" ? "is-active" : ""} onClick={() => props.onViewModeChange("split")}>
 						Split
+					</button>
+				</div>
+				<div className="segmented-control" role="tablist" aria-label="Layout mode" title="Layout · L">
+					<button className={props.layoutMode === "stream" ? "is-active" : ""} onClick={() => props.onLayoutModeChange("stream")} title="Show every file stacked">
+						Stream
+					</button>
+					<button className={props.layoutMode === "deck" ? "is-active" : ""} onClick={() => props.onLayoutModeChange("deck")} title="One file at a time">
+						Deck
 					</button>
 				</div>
 				<button className="button--primary button-with-shortcut" disabled={props.expired} onClick={props.onSendAll}>

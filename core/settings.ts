@@ -5,12 +5,14 @@ import path from "node:path";
 export type ViewerKind = "cmux" | "browser" | "none";
 export type CmuxMode = "pane" | "surface";
 export type DefaultViewMode = "split" | "unified";
+export type LayoutMode = "stream" | "deck";
 export type OutputMode = "prompt" | "beads" | "beads-script";
 
 export type DiffSettings = {
 	viewer: ViewerKind;
 	cmuxMode: CmuxMode;
 	defaultViewMode: DefaultViewMode;
+	layoutMode: LayoutMode;
 	output: OutputMode;
 	beadsCommand: string;
 	beadsLabels: string[];
@@ -22,6 +24,7 @@ export const DEFAULT_SETTINGS: DiffSettings = {
 	viewer: "browser",
 	cmuxMode: "pane",
 	defaultViewMode: "unified",
+	layoutMode: "stream",
 	output: "prompt",
 	beadsCommand: "bd",
 	beadsLabels: ["code-review"],
@@ -70,6 +73,9 @@ export function coerceSettings(raw: unknown): Partial<DiffSettings> {
 	}
 	if (raw.defaultViewMode === "split" || raw.defaultViewMode === "unified") {
 		out.defaultViewMode = raw.defaultViewMode;
+	}
+	if (raw.layoutMode === "stream" || raw.layoutMode === "deck") {
+		out.layoutMode = raw.layoutMode;
 	}
 	if (raw.output === "prompt" || raw.output === "beads" || raw.output === "beads-script") {
 		out.output = raw.output;
@@ -166,6 +172,7 @@ export function describeSettings(settings: DiffSettings): string {
 		`viewer            ${settings.viewer}`,
 		`cmuxMode          ${settings.cmuxMode}`,
 		`defaultViewMode   ${settings.defaultViewMode}`,
+		`layoutMode        ${settings.layoutMode}`,
 		`output            ${settings.output}`,
 		`beadsCommand      ${settings.beadsCommand}`,
 		`beadsType         ${settings.beadsType}`,

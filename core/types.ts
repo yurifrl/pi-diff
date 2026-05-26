@@ -5,6 +5,8 @@ export type DiffTarget =
 
 export type DiffViewMode = "unified" | "split";
 
+export type DiffLayoutMode = "stream" | "deck";
+
 export type DiffFileStatus = "modified" | "added" | "deleted" | "renamed";
 
 export type RepoMetadata = {
@@ -44,8 +46,11 @@ export type ViewerBootstrapPayload = {
 	target: ResolvedDiffTarget;
 	files: DiffFileEntry[];
 	defaultViewMode: DiffViewMode;
+	defaultLayoutMode: DiffLayoutMode;
 	beadsEnabled: boolean;
 	beadsConfigured: boolean;
+	buildVersion: string;       // e.g. "0.1.0" or "0.1.0-dev+abc1234"
+	buildKind: "release" | "dev";
 };
 
 export type ViewerSettingsResponse = {

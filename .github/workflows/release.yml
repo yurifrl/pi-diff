@@ -34,6 +34,8 @@ jobs:
         run: bun run scripts/build-web.mjs
 
       - name: Cross-compile binaries (bun)
+        env:
+          PI_DIFF_RELEASE: "1"
         run: |
           set -euo pipefail
           mkdir -p artifacts
@@ -51,7 +53,9 @@ jobs:
           done
 
       - name: Smoke test linux-x64 binary
-        run: ./artifacts/pi-diff-linux-x64 --help
+        run: |
+          ./artifacts/pi-diff-linux-x64 --help
+          ./artifacts/pi-diff-linux-x64 --version
 
       - name: Compute checksums
         run: |

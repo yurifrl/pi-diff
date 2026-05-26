@@ -1,9 +1,10 @@
-import type { DiffComment, DiffViewMode } from "../core/types";
+import type { DiffComment, DiffLayoutMode, DiffViewMode } from "../core/types";
 
 export type StoredViewerState = {
 	sidebarCollapsed: boolean;
 	searchQuery: string;
 	viewMode: DiffViewMode | null;
+	layoutMode: DiffLayoutMode | null;
 	wrapLines: boolean;
 	reviewedByFileId: Record<string, boolean>;
 	viewedFingerprintsByFileId: Record<string, string>;
@@ -19,6 +20,7 @@ export function createDefaultStoredViewerState(): StoredViewerState {
 		sidebarCollapsed: false,
 		searchQuery: "",
 		viewMode: null,
+		layoutMode: null,
 		wrapLines: true,
 		reviewedByFileId: {},
 		viewedFingerprintsByFileId: {},

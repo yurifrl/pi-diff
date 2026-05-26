@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { getChangeKey, type ChangeData } from "react-diff-view";
 import { findReusableDraftComment, removeCommentById, updateCommentText } from "../core/comments";
-import type { DiffComment, DiffFileEntry, DiffFilePayload, DiffLineComment, DiffOverallComment, DiffViewMode, SendCommentsResponse, ViewerBootstrapPayload, ViewerSettingsResponse } from "../core/types";
+import type { DiffComment, DiffFileEntry, DiffFilePayload, DiffLayoutMode, DiffLineComment, DiffOverallComment, DiffViewMode, SendCommentsResponse, ViewerBootstrapPayload, ViewerSettingsResponse } from "../core/types";
 import { filterFilesByQuery } from "./search";
 import { getAppLayoutClassName } from "./layout";
 import { ensureCollapsedStateForOverallComments } from "./overall-comments";
@@ -117,6 +117,7 @@ export function App({ viewerToken }: AppProps) {
 		ensureCollapsedStateForOverallComments(initialStoredState.collapsedCommentIds, initialComments),
 	);
 	const [viewModeOverride, setViewModeOverride] = useState<DiffViewMode | null>(initialStoredState.viewMode);
+	const [layoutModeOverride, setLayoutModeOverride] = useState<DiffLayoutMode | null>(initialStoredState.layoutMode);
 	const [loadedFiles, setLoadedFiles] = useState<Record<string, DiffFilePayload>>({});
 	const [loadErrors, setLoadErrors] = useState<Record<string, string>>({});
 	const [loadingFileIds, setLoadingFileIds] = useState<Record<string, boolean>>({});
@@ -134,6 +135,7 @@ export function App({ viewerToken }: AppProps) {
 	);
 
 	const viewMode = viewModeOverride ?? bootstrap?.defaultViewMode ?? "unified";
+	const layoutMode: DiffLayoutMode = layoutModeOverride ?? bootstrap?.defaultLayoutMode ?? "stream";
 	const files = bootstrap?.files ?? [];
 	const beadsEnabled = bootstrap?.beadsEnabled ?? false;
 	const beadsConfigured = bootstrap?.beadsConfigured ?? true;
@@ -216,6 +218,7 @@ export function App({ viewerToken }: AppProps) {
 			sidebarCollapsed,
 			searchQuery,
 			viewMode: viewModeOverride,
+			layoutMode: layoutModeOverride,
 			wrapLines,
 			reviewedByFileId,
 			viewedFingerprintsByFileId: currentViewedFingerprintsByFileId,
@@ -223,7 +226,7 @@ export function App({ viewerToken }: AppProps) {
 			collapsedCommentIds,
 			comments,
 		});
-	}, [bootstrap, collapsedCommentIds, collapsedFileIds, comments, currentViewedFingerprintsByFileId, reviewedByFileId, searchQuery, sidebarCollapsed, viewModeOverride, viewerToken, wrapLines]);
+	}, [bootstrap, collapsedCommentIds, collapsedFileIds, comments, currentViewedFingerprintsByFileId, layoutModeOverride, reviewedByFileId, searchQuery, sidebarCollapsed, viewModeOverride, viewerToken, wrapLines]);
 
 	const registerCommentTextarea = useCallback((commentId: string, element: HTMLTextAreaElement | null) => {
 		if (element) {
@@ -576,6 +579,31 @@ export function App({ viewerToken }: AppProps) {
 
 	const overallComments = comments.filter((comment): comment is DiffOverallComment => comment.kind === "overall");
 
+	// Deck mode navigation derived state
+	const deckIndex = useMemo(() => {
+		if (files.length === 0) return -1;
+		if (!activeFileId) return 0;
+		const i = files.findIndex((f) => f.id === activeFileId);
+		return i >= 0 ? i : 0;
+	}, [files, activeFileId]);
+	const deckFile: DiffFileEntry | null = deckIndex >= 0 ? (files[deckIndex] ?? null) : null;
+	const goToFileIndex = useCallback(
+		(target: number) => {
+			if (files.length === 0) return;
+			const clamped = Math.max(0, Math.min(files.length - 1, target));
+			const file = files[clamped];
+			if (!file) return;
+			void jumpToFile(file.id);
+		},
+		[files, jumpToFile],
+	);
+	const toggleLayoutMode = useCallback(() => {
+		setLayoutModeOverride((current) => {
+			const effective = current ?? bootstrap?.defaultLayoutMode ?? "stream";
+			return effective === "deck" ? "stream" : "deck";
+		});
+	}, [bootstrap?.defaultLayoutMode]);
+
 	useEffect(() => {
 		const handleKeyDown = (event: KeyboardEvent) => {
 			if (isSendAllShortcut(event)) {
@@ -619,12 +647,46 @@ export function App({ viewerToken }: AppProps) {
 			if (isRefreshShortcut(event)) {
 				event.preventDefault();
 				refreshViewer();
+				return;
+			}
+
+			// Deck navigation: only when deck layout is active.
+			if (layoutMode === "deck") {
+				if (event.key === "l" || event.key === "L") {
+					event.preventDefault();
+					toggleLayoutMode();
+					return;
+				}
+				if (event.key === "ArrowLeft") {
+					event.preventDefault();
+					goToFileIndex(deckIndex - 1);
+					return;
+				}
+				if (event.key === "ArrowRight") {
+					event.preventDefault();
+					goToFileIndex(deckIndex + 1);
+					return;
+				}
+				if (event.key === "Home") {
+					event.preventDefault();
+					goToFileIndex(0);
+					return;
+				}
+				if (event.key === "End") {
+					event.preventDefault();
+					goToFileIndex(files.length - 1);
+					return;
+				}
+			} else if (event.key === "l" || event.key === "L") {
+				event.preventDefault();
+				toggleLayoutMode();
+				return;
 			}
 		};
 
 		window.addEventListener("keydown", handleKeyDown);
 		return () => window.removeEventListener("keydown", handleKeyDown);
-	}, [refreshViewer, sendComments, sidebarOverlayMode, sidebarPopoverOpen, unsentComments]);
+	}, [deckIndex, files.length, goToFileIndex, layoutMode, refreshViewer, sendComments, sidebarOverlayMode, sidebarPopoverOpen, toggleLayoutMode, unsentComments]);
 
 	if (bootstrapError && !bootstrap) {
 		return (
@@ -663,7 +725,10 @@ export function App({ viewerToken }: AppProps) {
 			<Toolbar
 				repoName={bootstrap?.repo.name ?? "diff-cmux"}
 				targetLabel={bootstrap?.target.label ?? "Loading…"}
+				buildVersion={bootstrap?.buildVersion ?? ""}
+				buildKind={bootstrap?.buildKind ?? "dev"}
 				viewMode={viewMode}
+				layoutMode={layoutMode}
 				wrapLines={wrapLines}
 				unsentCount={unsentComments.length}
 				expired={expired}
@@ -671,13 +736,14 @@ export function App({ viewerToken }: AppProps) {
 				beadsConfigured={beadsConfigured}
 				beadsToggleBusy={beadsToggleBusy}
 				onViewModeChange={setViewModeOverride}
+				onLayoutModeChange={setLayoutModeOverride}
 				onWrapToggle={() => setWrapLines((current) => !current)}
 				onToggleBeads={() => void toggleBeads()}
 				onToggleSidebarPopover={openSidebarSearch}
 				onRefresh={refreshViewer}
 				onSendAll={() => void handleDone()}
 			/>
-			<div className={getAppLayoutClassName(sidebarCollapsed, sidebarPopoverOpen)}>
+			<div className={getAppLayoutClassName(sidebarCollapsed, sidebarPopoverOpen, layoutMode)}>
 				<button
 					aria-label="Close file list"
 					className={`app-layout__sidebar-backdrop ${sidebarOverlayMode && sidebarPopoverOpen ? "is-visible" : ""}`}
@@ -782,7 +848,25 @@ export function App({ viewerToken }: AppProps) {
 							</div>
 						) : null}
 					</section>
-					{files.map((file) => (
+					{layoutMode === "deck" && files.length > 0 ? (
+						<section className="deck-progress" aria-label="Deck progress">
+							<div className="deck-progress__track">
+								<span className="deck-progress__label deck-progress__label--start">old</span>
+								<div className="deck-progress__bar">
+									<div
+										className="deck-progress__fill"
+										style={{ width: `${((deckIndex + 1) / Math.max(1, files.length)) * 100}%` }}
+									/>
+								</div>
+								<span className="deck-progress__label deck-progress__label--end">now</span>
+							</div>
+							<div className="deck-progress__meta">
+								<span><strong>{deckIndex + 1}</strong> of <strong>{files.length}</strong></span>
+								<span className="deck-progress__path">{deckFile?.path ?? ""}</span>
+							</div>
+						</section>
+					) : null}
+					{(layoutMode === "deck" ? (deckFile ? [deckFile] : []) : files).map((file) => (
 						<section
 							className="file-stream__section"
 							data-file-id={file.id}
@@ -828,6 +912,14 @@ export function App({ viewerToken }: AppProps) {
 							/>
 						</section>
 					))}
+					{layoutMode === "deck" && files.length > 0 ? (
+						<nav className="deck-nav" aria-label="Deck navigation">
+							<button className="deck-nav__btn" disabled={deckIndex <= 0} onClick={() => goToFileIndex(0)} title="First file (Home)" type="button">⇤</button>
+							<button className="deck-nav__btn" disabled={deckIndex <= 0} onClick={() => goToFileIndex(deckIndex - 1)} title="Previous file (←)" type="button">◀</button>
+							<button className="deck-nav__btn" disabled={deckIndex >= files.length - 1} onClick={() => goToFileIndex(deckIndex + 1)} title="Next file (→)" type="button">▶</button>
+							<button className="deck-nav__btn" disabled={deckIndex >= files.length - 1} onClick={() => goToFileIndex(files.length - 1)} title="Last file (End)" type="button">⇥</button>
+						</nav>
+					) : null}
 				</main>
 			</div>
 		</div>
