@@ -221,6 +221,16 @@ When `viewer = cmux`, the CLI uses `cmux identify` to find the current workspace
 
 ## Architecture
 
+### Local development
+
+```bash
+bun install
+bun run dev                  # esbuild watches web/, opens viewer on uncommitted diff
+bun run dev -- branch main   # same, against a different target
+```
+
+`bun run dev` keeps `web/dist/app.{js,css}` rebuilt on every save. The CLI serves the latest bundle from disk, so editing `web/**` and refreshing the browser is the full loop. Ctrl+C stops both.
+
 ```
 pi-diff/
 ├── core/        # runtime-agnostic library (no pi imports, takes an injected Exec)

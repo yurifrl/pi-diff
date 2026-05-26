@@ -78,13 +78,22 @@ tasks:
       - npx tsx cli.ts {{.CLI_ARGS}}
 
   install:local:
-    desc: Build a binary and symlink it into ~/.local/bin
+    desc: "Build a binary and install it (default PREFIX=/usr/local/bin, override with PREFIX=...)"
     deps: [build:binary]
+    vars:
+      PREFIX: '{{.PREFIX | default "/usr/local/bin"}}'
     cmds:
-      - mkdir -p $HOME/.local/bin
-      - cp ./{{.BIN_NAME}} $HOME/.local/bin/{{.BIN_NAME}}
-      - chmod +x $HOME/.local/bin/{{.BIN_NAME}}
-      - "echo 'installed → ~/.local/bin/{{.BIN_NAME}} (ensure that is on your PATH)'"
+      - |
+        set -e
+        DEST="{{.PREFIX}}/{{.BIN_NAME}}"
+        if mkdir -p "{{.PREFIX}}" 2>/dev/null && [ -w "{{.PREFIX}}" ]; then
+          install -m 0755 "./{{.BIN_NAME}}" "$DEST"
+        else
+          echo "{{.PREFIX}} not writable, using sudo"
+          sudo mkdir -p "{{.PREFIX}}"
+          sudo install -m 0755 "./{{.BIN_NAME}}" "$DEST"
+        fi
+        echo "installed → $DEST"
 
   release:tag:
     desc: "Cut a release: task release:tag VERSION=v0.1.0"

@@ -33,6 +33,7 @@
     "vitest": "^4.0.14"
   },
   "scripts": {
+    "dev": "node ./scripts/dev.mjs",
     "build": "node ./scripts/build-web.mjs && npm run build:ts",
     "build:ts": "tsc -p tsconfig.json && node -e \"require('fs').chmodSync('dist/cli.js', 0o755)\"",
     "test": "vitest run tests/*.test.ts"
