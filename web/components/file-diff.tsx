@@ -234,7 +234,7 @@ export function FileDiff(props: FileDiffProps) {
 			</header>
 
 			{!props.collapsed && fileComments.length > 0 ? (
-				<div className="file-comment-list">
+				<div className="file-comment-list grid">
 					{fileComments.map((comment) =>
 						renderCommentEditor(
 							comment,

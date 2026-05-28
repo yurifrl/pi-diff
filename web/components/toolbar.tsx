@@ -28,7 +28,7 @@ export function Toolbar(props: ToolbarProps) {
 	const sendAllHint = getSendAllHint();
 
 	return (
-		<header className="toolbar">
+		<header className="toolbar flex">
 			<div className="toolbar__leading">
 				<button aria-label="Files · T" className="toolbar__sidebar-trigger" onClick={props.onToggleSidebarPopover} title="Files · T" type="button">
 					<svg aria-hidden="true" className="toolbar__sidebar-icon" viewBox="0 0 16 16">

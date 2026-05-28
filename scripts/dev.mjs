@@ -1,18 +1,57 @@
 #!/usr/bin/env node
 // Dev loop for pi-diff:
-//   1. esbuild rebuilds web/dist/app.{js,css} on every file change in web/
-//   2. `bun cli.ts diff` runs the viewer; it serves the latest bundle from disk,
+//   1. tailwind: compile web/styles.src.css -> web/styles.generated.css once at startup,
+//      then re-run on changes to that file via fs.watch (chokidar-free). NOTE: tailwind
+//      JIT also keys off utility usage in web/**/*.tsx; those changes are picked up by
+//      esbuild rebuilds importing the generated CSS, but a *new* utility class only
+//      appears in styles.generated.css after the next tailwind run. Editing
+//      web/styles.src.css triggers a fresh tailwind build (which re-scans sources),
+//      so simply touch that file or restart `npm run dev` after introducing a brand
+//      new utility class. This is an intentional simplification.
+//   2. esbuild rebuilds web/dist/app.{js,css} on every file change in web/.
+//   3. `bun cli.ts diff` runs the viewer; it serves the latest bundle from disk,
 //      so a browser refresh is enough to see web changes.
 //
 // Stops both on Ctrl+C.
 
 import { context } from "esbuild";
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
+import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const packageDir = path.resolve(scriptDir, "..");
+const stylesSrc = path.join(packageDir, "web/styles.src.css");
+
+function runTailwind({ watch = false } = {}) {
+	const args = [
+		"--no-install",
+		"@tailwindcss/cli",
+		"-i",
+		"web/styles.src.css",
+		"-o",
+		"web/styles.generated.css",
+	];
+	if (!watch) {
+		const r = spawnSync("npx", args, { cwd: packageDir, stdio: "inherit" });
+		if (r.status !== 0) {
+			console.error("[dev] tailwind compile failed");
+			process.exit(r.status ?? 1);
+		}
+	}
+}
+
+runTailwind();
+
+let twTimer = null;
+fs.watch(stylesSrc, () => {
+	clearTimeout(twTimer);
+	twTimer = setTimeout(() => {
+		console.log("[dev] styles.src.css changed — re-running tailwind");
+		runTailwind();
+	}, 50);
+});
 
 const ctx = await context({
 	absWorkingDir: packageDir,

@@ -16,3 +16,6 @@ dist/
 !.crew/graphs/
 !.crew/artifacts/.gitkeep
 !.crew/graphs/.gitkeep
+
+# Tailwind v4 build output (compiled from web/styles.src.css)
+web/styles.generated.css
