@@ -91,7 +91,7 @@ async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> {
 	return await response.json();
 }
 
-const BEAD_STATUS_OPTIONS = ["open", "in_progress", "blocked", "deferred", "closed"];
+const BEAD_STATUS_OPTIONS = ["open", "in_progress", "blocked", "deferred", "closed", "pinned", "hooked"];
 
 type LinkedBead = { id: string; title: string; status: string };
 type ApplyBeadsResponse = { results: Array<{ id: string; status: string; ok: boolean; error?: string }>; formattedText: string };

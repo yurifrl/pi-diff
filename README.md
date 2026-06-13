@@ -111,7 +111,7 @@ pi-diff branch main  --name "Refactor parser"
 
 - `pi-diff serve` starts a long-lived server, opens the multi-tab page, and records `{port,pid}` in `~/.pi/agent/pi-diff-server.json`.
 - A later `pi-diff <target> --name … --bead …` detects the running server, registers the diff as a new tab, and **exits immediately**. If no server is running it falls back to the normal single-shot flow (use `--no-server` to force that).
-- The **serve process owns output**: comment submissions are emitted from *its* stdout (`prompt`) or create beads (`beads`); linked-bead status changes (`open` / `in_progress` / `blocked` / `deferred` / `closed`) are applied by it via `bd update`.
+- The **serve process owns output**: comment submissions are emitted from *its* stdout (`prompt`) or create beads (`beads`); linked-bead status changes (`open` / `in_progress` / `blocked` / `deferred` / `closed` / `pinned` / `hooked`, plus any custom statuses bd accepts) are applied by it via `bd update`.
 - `--bead` accepts one or more existing bead IDs. They appear in the viewer's *Linked beads* panel with a per-bead status dropdown; applying changes runs `bd update <id> --status <new>`.
 
 | Serve flag | Values | Effect |

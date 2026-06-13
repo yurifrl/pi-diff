@@ -5,7 +5,7 @@ import type { Exec } from "../core/exec";
 
 describe("isBeadStatus", () => {
 	test("accepts built-in statuses", () => {
-		for (const s of ["open", "in_progress", "blocked", "deferred", "closed"]) {
+		for (const s of ["open", "in_progress", "blocked", "deferred", "closed", "pinned", "hooked"]) {
 			expect(isBeadStatus(s)).toBe(true);
 		}
 	});

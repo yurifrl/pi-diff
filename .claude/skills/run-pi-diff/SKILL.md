@@ -113,8 +113,9 @@ pi-diff --help | --version
   (`output: prompt`) or create beads (`output: beads`); linked-bead status
   changes are applied by it via `bd update <id> --status <new>`.
 - In the viewer, the **Linked beads** panel shows each `--bead` with a status
-  dropdown (`open` / `in_progress` / `blocked` / `deferred` / `closed`); Apply
-  posts to `/api/viewer/:token/beads`.
+  dropdown (`open` / `in_progress` / `blocked` / `deferred` / `closed` /
+  `pinned` / `hooked` — bd's built-in set; custom statuses bd accepts also
+  pass through); Apply posts to `/api/viewer/:token/beads`.
 
 ### HTTP surface (all verified by the driver)
 - `GET  /` — multi-tab shell page (`window.__PI_DIFF_SHELL__ = true`).

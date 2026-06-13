@@ -143,7 +143,7 @@ export async function createBeadsForComments(
 	return out;
 }
 
-export const BEAD_STATUSES = ["open", "in_progress", "blocked", "deferred", "closed"] as const;
+export const BEAD_STATUSES = ["open", "in_progress", "blocked", "deferred", "closed", "pinned", "hooked"] as const;
 export type BeadStatus = (typeof BEAD_STATUSES)[number];
 
 export function isBeadStatus(value: unknown): value is BeadStatus {
@@ -197,16 +197,20 @@ export async function loadBeads(exec: Exec, ids: string[], command: string, cwd:
 
 export type BeadStatusUpdate = {
 	id: string;
-	status: BeadStatus;
+	status: string;
 	ok: boolean;
 	error?: string;
 };
 
-/** Apply a single status change via `bd update <id> --status <status>`. */
+/**
+ * Apply a single status change via `bd update <id> --status <status>`. The
+ * status string is passed straight to bd, which is the authority on which
+ * statuses are valid (built-in or custom); bd's error is surfaced on failure.
+ */
 export async function updateBeadStatus(
 	exec: Exec,
 	id: string,
-	status: BeadStatus,
+	status: string,
 	command: string,
 	cwd: string,
 ): Promise<BeadStatusUpdate> {
@@ -224,7 +228,7 @@ export async function updateBeadStatus(
 /** Apply many status changes sequentially (bd writes are not concurrency-safe). */
 export async function applyBeadStatuses(
 	exec: Exec,
-	updates: Array<{ id: string; status: BeadStatus }>,
+	updates: Array<{ id: string; status: string }>,
 	command: string,
 	cwd: string,
 ): Promise<BeadStatusUpdate[]> {

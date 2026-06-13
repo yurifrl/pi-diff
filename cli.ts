@@ -3,7 +3,7 @@ import { spawn } from "node:child_process";
 import React from "react";
 import { render } from "ink";
 import { appendAttempt, formatBackupSummary, listBackupFiles, readBackup, summarizeBeadsResult, updateLastResult } from "./core/backups.js";
-import { createBeadsForComments, isBeadsAvailable, isBeadsRepoConfigured, summarizeCreated, type CreatedBead, applyBeadStatuses, isBeadStatus, loadBeads } from "./core/bd-client.js";
+import { createBeadsForComments, isBeadsAvailable, isBeadsRepoConfigured, summarizeCreated, type CreatedBead, applyBeadStatuses, loadBeads } from "./core/bd-client.js";
 import { formatCommentsAsBeadsScript } from "./core/beads.js";
 import { formatCommentsForEditor } from "./core/comments.js";
 import { getVersionInfo } from "./core/version.js";
@@ -533,14 +533,7 @@ async function buildServeSessionInput(payload: RegisterDiffPayload): Promise<Cre
 			return result;
 		},
 		applyBeadStatuses: async (changes: BeadStatusChange[]): Promise<ApplyBeadStatusesResponse> => {
-			const valid: Array<{ id: string; status: import("./core/bd-client.js").BeadStatus }> = [];
-			const invalid: ApplyBeadStatusesResponse["results"] = [];
-			for (const c of changes) {
-				if (isBeadStatus(c.status)) valid.push({ id: c.id, status: c.status });
-				else invalid.push({ id: c.id, status: c.status, ok: false, error: `invalid status: ${c.status}` });
-			}
-			const applied = await applyBeadStatuses(nodeExec, valid, settings.beadsCommand, payload.cwd);
-			const results = [...applied, ...invalid];
+			const results = await applyBeadStatuses(nodeExec, changes, settings.beadsCommand, payload.cwd);
 			const ok = results.filter((r) => r.ok);
 			const failed = results.filter((r) => !r.ok);
 			const lines: string[] = [];
@@ -578,6 +571,13 @@ async function runServe(flags: ServeFlags): Promise<number> {
 	await server.start();
 	const port = server.getPort();
 	const url = `http://127.0.0.1:${port}/`;
+
+	// Register shutdown handlers BEFORE writing the state file, so a signal that
+	// arrives immediately after startup still clears the file instead of leaking it.
+	const shutdown = new Promise<void>((resolve) => {
+		process.on("SIGINT", () => resolve());
+		process.on("SIGTERM", () => resolve());
+	});
 	await writeServerState({ port, pid: process.pid, startedAt: Date.now() });
 
 	if (flags.viewer !== "none" && !flags.noOpen) {
@@ -589,11 +589,7 @@ async function runServe(flags: ServeFlags): Promise<number> {
 	console.log(`Register diffs with: pi-diff <target> --name "..." --bead <id>`);
 	console.log(`Press Ctrl+C to stop.`);
 
-	await new Promise<void>((resolve) => {
-		const shutdown = () => resolve();
-		process.on("SIGINT", shutdown);
-		process.on("SIGTERM", shutdown);
-	});
+	await shutdown;
 	await clearServerState();
 	await server.stop();
 	console.log("\npi-diff server stopped.");
@@ -718,14 +714,7 @@ async function runMain(targetTokens: string[], flags: MainFlags): Promise<number
 			}
 		},
 		applyBeadStatuses: async (changes: BeadStatusChange[]): Promise<ApplyBeadStatusesResponse> => {
-			const valid: Array<{ id: string; status: import("./core/bd-client.js").BeadStatus }> = [];
-			const invalid: ApplyBeadStatusesResponse["results"] = [];
-			for (const c of changes) {
-				if (isBeadStatus(c.status)) valid.push({ id: c.id, status: c.status });
-				else invalid.push({ id: c.id, status: c.status, ok: false, error: `invalid status: ${c.status}` });
-			}
-			const applied = await applyBeadStatuses(nodeExec, valid, settings.beadsCommand, cwd);
-			const results = [...applied, ...invalid];
+			const results = await applyBeadStatuses(nodeExec, changes, settings.beadsCommand, cwd);
 			const ok = results.filter((r) => r.ok);
 			const lines: string[] = [];
 			if (ok.length) lines.push(`Updated ${ok.length} bead(s): ${ok.map((r) => `${r.id}->${r.status}`).join(", ")}`);
