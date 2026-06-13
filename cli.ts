@@ -3,7 +3,7 @@ import { spawn } from "node:child_process";
 import React from "react";
 import { render } from "ink";
 import { appendAttempt, formatBackupSummary, listBackupFiles, readBackup, summarizeBeadsResult, updateLastResult } from "./core/backups.js";
-import { createBeadsForComments, isBeadsAvailable, isBeadsRepoConfigured, summarizeCreated, type CreatedBead } from "./core/bd-client.js";
+import { createBeadsForComments, isBeadsAvailable, isBeadsRepoConfigured, summarizeCreated, type CreatedBead, applyBeadStatuses, isBeadStatus, loadBeads } from "./core/bd-client.js";
 import { formatCommentsAsBeadsScript } from "./core/beads.js";
 import { formatCommentsForEditor } from "./core/comments.js";
 import { getVersionInfo } from "./core/version.js";
@@ -11,10 +11,11 @@ const __versionInfo = getVersionInfo();
 import type { Exec, ExecOptions, ExecResult } from "./core/exec.js";
 import { buildDiffViewerData, hasWorkingTreeChanges, isGitRepository } from "./core/git.js";
 import { handleSendComments, isBeadsOutputMode } from "./core/handle-send.js";
-import { createDiffServer } from "./core/server.js";
+import { createDiffServer, type CreateViewerSessionInput } from "./core/server.js";
+import { clearServerState, isServerAlive, postRegister, readServerState, writeServerState } from "./core/server-discovery.js";
 import { coerceSettings, describeSettings, type DiffSettings, loadSettings, mergeSettings, saveSettings, type SettingsLocation } from "./core/settings.js";
 import { parseDiffTargetArgs } from "./core/target-resolver.js";
-import type { DiffComment, DiffTarget, ResolvedDiffTarget, SendCommentsResponse } from "./core/types.js";
+import type { ApplyBeadStatusesResponse, BeadStatusChange, DiffComment, DiffTarget, RegisterDiffPayload, ResolvedDiffTarget, SendCommentsResponse } from "./core/types.js";
 import { openViewer } from "./core/viewer.js";
 import { App } from "./cli/app.js";
 import { TargetPickerApp } from "./cli/target-picker-app.js";
@@ -71,12 +72,22 @@ type MainFlags = {
 	cwd?: string;
 	noOpen?: boolean;
 	autoSubmit?: boolean;
+	name?: string;
+	beads: string[];
+	noServer?: boolean;
+};
+
+type ServeFlags = {
+	cwd?: string;
+	viewer?: DiffSettings["viewer"];
+	noOpen?: boolean;
 };
 
 type ParsedArgs =
 	| { kind: "help" }
 	| { kind: "version" }
 	| { kind: "main"; targetTokens: string[]; flags: MainFlags }
+	| { kind: "serve"; flags: ServeFlags }
 	| { kind: "settings-show" }
 	| { kind: "settings-set"; key: string; value: string; location: SettingsLocation }
 	| { kind: "backups-list" }
@@ -84,9 +95,24 @@ type ParsedArgs =
 
 function parseArgv(argv: string[]): ParsedArgs {
 	const args = argv.slice();
-	if (args.length === 0) return { kind: "main", targetTokens: [], flags: {} };
+	if (args.length === 0) return { kind: "main", targetTokens: [], flags: { beads: [] } };
 	if (args[0] === "-h" || args[0] === "--help") return { kind: "help" };
 	if (args[0] === "-V" || args[0] === "--version" || args[0] === "version") return { kind: "version" };
+
+	if (args[0] === "serve") {
+		const flags: ServeFlags = {};
+		for (let i = 1; i < args.length; i += 1) {
+			const a = args[i];
+			if (a === "--cwd") flags.cwd = args[++i];
+			else if (a === "--no-open") flags.noOpen = true;
+			else if (a === "--viewer") {
+				const v = args[++i];
+				if (v !== "cmux" && v !== "browser" && v !== "none") return { kind: "error", message: `--viewer must be cmux|browser|none` };
+				flags.viewer = v;
+			} else return { kind: "error", message: `Unknown serve flag: ${a}` };
+		}
+		return { kind: "serve", flags };
+	}
 
 	if (args[0] === "settings") {
 		const sub = args[1] ?? "show";
@@ -110,7 +136,7 @@ function parseArgv(argv: string[]): ParsedArgs {
 		return { kind: "backups-list" };
 	}
 
-	const flags: MainFlags = {};
+	const flags: MainFlags = { beads: [] };
 	const targetTokens: string[] = [];
 	for (let i = 0; i < args.length; i += 1) {
 		const a = args[i];
@@ -124,8 +150,15 @@ function parseArgv(argv: string[]): ParsedArgs {
 			flags.output = v;
 		} else if (a === "--cwd") {
 			flags.cwd = args[++i];
+		} else if (a === "--name") {
+			flags.name = args[++i];
+		} else if (a === "--bead" || a === "--beads") {
+			const v = args[++i] ?? "";
+			for (const id of v.split(",").map((s) => s.trim()).filter(Boolean)) flags.beads.push(id);
 		} else if (a === "--no-open") {
 			flags.noOpen = true;
+		} else if (a === "--no-server") {
+			flags.noServer = true;
 		} else if (a === "--auto-submit") {
 			flags.autoSubmit = true;
 		} else if (a.startsWith("--")) {
@@ -141,6 +174,7 @@ const HELP_TEXT = `pi-diff — GitHub-style diff review for the terminal
 
 USAGE:
   pi-diff [target] [flags]      open the diff viewer for a target
+  pi-diff serve [flags]         run a persistent server; later diffs become tabs
   pi-diff settings show
   pi-diff settings set [--project|--global] <key> <value>
   pi-diff backups list
@@ -153,14 +187,34 @@ TARGETS:
   commit <sha>                  <sha> vs its parent
   (no target)                   interactive prompt
 
+PULL-REQUEST / SERVER MODE:
+  pi-diff serve                 start a long-lived server + multi-tab web page,
+                                then keep running until Ctrl+C. It owns comment
+                                output (prompt -> its stdout; beads -> bd create)
+                                and applies linked-bead status changes.
+  pi-diff <target> --name "X" --bead bd-1 --bead bd-2
+                                if a server is running, register a new PR tab
+                                named "X" with linked beads and exit immediately;
+                                otherwise fall back to the single-shot flow.
+
 FLAGS (main flow):
+  --name <title>                title for the PR/tab (default: the target label)
+  --bead <id>                   link an existing bead; repeatable, or comma-list
+                                (--bead bd-1,bd-2). Their state can be changed
+                                from the viewer's Finish-review panel.
   --viewer cmux|browser|none    override the configured viewer for this run
   --output prompt|beads|beads-script
                                 override the configured output mode
   --cwd <path>                  run as if executed from <path>
   --no-open                     don't try to open the viewer; just print the URL
+  --no-server                   ignore any running server; force single-shot
   --auto-submit                 process the first browser submission and exit
                                 (skip the interactive TUI)
+
+FLAGS (serve):
+  --cwd <path>                  base directory for the server process
+  --viewer cmux|browser|none    how to open the multi-tab page on start
+  --no-open                     just print the URL; don't open anything
 `;
 
 // ---------------------------------------------------------------------------
@@ -404,6 +458,149 @@ async function loadEmbeddedAssetServerOptions(): Promise<import("./core/server.j
 }
 
 // ---------------------------------------------------------------------------
+// Server mode: register a diff with a running server, or run the server.
+// ---------------------------------------------------------------------------
+
+function buildRegisterPayload(
+	viewerData: import("./core/types.js").DiffViewerData,
+	flags: MainFlags,
+	cwd: string,
+): RegisterDiffPayload {
+	const filePayloads: RegisterDiffPayload["filePayloads"] = {};
+	for (const [id, payload] of viewerData.filePayloads) filePayloads[id] = payload;
+	return {
+		name: flags.name && flags.name.trim() ? flags.name.trim() : undefined,
+		cwd,
+		repo: viewerData.repo,
+		target: viewerData.target,
+		files: viewerData.files,
+		filePayloads,
+		beadIds: flags.beads,
+	};
+}
+
+/**
+ * Build a viewer session from a pushed diff payload, for the persistent serve
+ * process. This process OWNS comment output: prompt text prints to its stdout,
+ * beads create real tasks. It also applies linked-bead status changes.
+ */
+async function buildServeSessionInput(payload: RegisterDiffPayload): Promise<CreateViewerSessionInput> {
+	const settings = await loadSettings(payload.cwd);
+	const name = payload.name && payload.name.trim() ? payload.name.trim() : payload.target.label;
+	const filePayloads = new Map(Object.entries(payload.filePayloads));
+
+	const loadLinkedBeads = () => loadBeads(nodeExec, payload.beadIds, settings.beadsCommand, payload.cwd);
+	let linkedBeads = await loadLinkedBeads();
+
+	const computeBootstrap = () => ({
+		name,
+		repo: payload.repo,
+		target: payload.target,
+		files: payload.files,
+		defaultViewMode: settings.defaultViewMode,
+		defaultLayoutMode: settings.layoutMode,
+		beadsEnabled: isBeadsOutputMode(settings.output),
+		beadsConfigured: isBeadsRepoConfigured(payload.cwd),
+		linkedBeads,
+		buildVersion: __versionInfo.display,
+		buildKind: __versionInfo.buildKind,
+	});
+
+	return {
+		bootstrap: computeBootstrap(),
+		refreshBootstrap: async () => {
+			linkedBeads = await loadLinkedBeads();
+			return computeBootstrap();
+		},
+		loadFile: async (fileId) => filePayloads.get(fileId) ?? null,
+		sendComments: async (comments: DiffComment[]): Promise<SendCommentsResponse> => {
+			console.log(`\npi-diff [${name}]: received ${comments.length} comment(s).`);
+			const result = await handleSendComments(
+				{
+					exec: nodeExec,
+					cwd: payload.cwd,
+					sessionFile: null,
+					settings,
+					target: payload.target,
+					notify: (msg, level) => {
+						if (level === "error") console.error(`pi-diff [${name}]: ${msg}`);
+						else console.log(`pi-diff [${name}]: ${msg}`);
+					},
+				},
+				comments,
+			);
+			process.stdout.write(`${result.formattedText}\n`);
+			return result;
+		},
+		applyBeadStatuses: async (changes: BeadStatusChange[]): Promise<ApplyBeadStatusesResponse> => {
+			const valid: Array<{ id: string; status: import("./core/bd-client.js").BeadStatus }> = [];
+			const invalid: ApplyBeadStatusesResponse["results"] = [];
+			for (const c of changes) {
+				if (isBeadStatus(c.status)) valid.push({ id: c.id, status: c.status });
+				else invalid.push({ id: c.id, status: c.status, ok: false, error: `invalid status: ${c.status}` });
+			}
+			const applied = await applyBeadStatuses(nodeExec, valid, settings.beadsCommand, payload.cwd);
+			const results = [...applied, ...invalid];
+			const ok = results.filter((r) => r.ok);
+			const failed = results.filter((r) => !r.ok);
+			const lines: string[] = [];
+			if (ok.length) lines.push(`Updated ${ok.length} bead(s): ${ok.map((r) => `${r.id}->${r.status}`).join(", ")}`);
+			for (const r of failed) lines.push(`! ${r.id}: ${r.error ?? "failed"}`);
+			const formattedText = lines.join("\n");
+			console.log(`\npi-diff [${name}]: ${formattedText}`);
+			return { results, formattedText };
+		},
+	};
+}
+
+async function tryRegisterWithServer(payload: RegisterDiffPayload): Promise<{ token: string; url: string } | null> {
+	const state = await readServerState();
+	if (!state) return null;
+	if (!(await isServerAlive(state))) {
+		await clearServerState();
+		return null;
+	}
+	return await postRegister(state.port, payload);
+}
+
+async function runServe(flags: ServeFlags): Promise<number> {
+	const cwd = flags.cwd ? flags.cwd : process.cwd();
+	const existing = await readServerState();
+	if (existing && (await isServerAlive(existing))) {
+		console.error(`pi-diff: a server is already running (pid ${existing.pid}, port ${existing.port}). Open http://127.0.0.1:${existing.port}/`);
+		return 1;
+	}
+
+	const server = createDiffServer({
+		...(await loadEmbeddedAssetServerOptions()),
+		onRegister: buildServeSessionInput,
+	});
+	await server.start();
+	const port = server.getPort();
+	const url = `http://127.0.0.1:${port}/`;
+	await writeServerState({ port, pid: process.pid, startedAt: Date.now() });
+
+	if (flags.viewer !== "none" && !flags.noOpen) {
+		const settings = await loadSettings(cwd);
+		const opened = await openViewer(nodeExec, cwd, url, mergeSettings(settings, flags.viewer ? { viewer: flags.viewer } : {}));
+		console.log(opened.ok ? opened.message : `${opened.message} (open ${url})`);
+	}
+	console.log(`pi-diff server listening on ${url}`);
+	console.log(`Register diffs with: pi-diff <target> --name "..." --bead <id>`);
+	console.log(`Press Ctrl+C to stop.`);
+
+	await new Promise<void>((resolve) => {
+		const shutdown = () => resolve();
+		process.on("SIGINT", shutdown);
+		process.on("SIGTERM", shutdown);
+	});
+	await clearServerState();
+	await server.stop();
+	console.log("\npi-diff server stopped.");
+	return 0;
+}
+
+// ---------------------------------------------------------------------------
 // Main flow.
 // ---------------------------------------------------------------------------
 
@@ -436,6 +633,20 @@ async function runMain(targetTokens: string[], flags: MainFlags): Promise<number
 
 	const viewerData = await buildDiffViewerData(nodeExec, cwd, target);
 	const resolvedTarget: ResolvedDiffTarget = viewerData.target;
+	const prName = flags.name && flags.name.trim() ? flags.name.trim() : resolvedTarget.label;
+
+	// If a persistent server is running, register this diff as a new tab and exit
+	// immediately. The serve process owns comment output and bead updates.
+	if (!flags.noServer && !flags.autoSubmit) {
+		const registered = await tryRegisterWithServer(buildRegisterPayload(viewerData, flags, cwd));
+		if (registered) {
+			console.log(`pi-diff: registered "${prName}" with the running server.`);
+			console.log(registered.url);
+			return 0;
+		}
+	}
+
+	const linkedBeads = await loadBeads(nodeExec, flags.beads, settings.beadsCommand, cwd);
 
 	// Phase A: accumulate every browser submission. The user can submit many
 	// times (inline + Send-all). Server stays alive across the whole run.
@@ -467,6 +678,7 @@ async function runMain(targetTokens: string[], flags: MainFlags): Promise<number
 	const server = createDiffServer(await loadEmbeddedAssetServerOptions());
 	const session = await server.createViewerSession({
 		bootstrap: {
+			name: prName,
 			repo: viewerData.repo,
 			target: viewerData.target,
 			files: viewerData.files,
@@ -474,6 +686,7 @@ async function runMain(targetTokens: string[], flags: MainFlags): Promise<number
 			defaultLayoutMode: settings.layoutMode,
 			beadsEnabled: isBeadsOutputMode(settings.output),
 			beadsConfigured: isBeadsRepoConfigured(cwd),
+			linkedBeads,
 			buildVersion: __versionInfo.display,
 			buildKind: __versionInfo.buildKind,
 		},
@@ -503,6 +716,21 @@ async function runMain(targetTokens: string[], flags: MainFlags): Promise<number
 			for (const l of ls) {
 				try { l(); } catch { /* ignore */ }
 			}
+		},
+		applyBeadStatuses: async (changes: BeadStatusChange[]): Promise<ApplyBeadStatusesResponse> => {
+			const valid: Array<{ id: string; status: import("./core/bd-client.js").BeadStatus }> = [];
+			const invalid: ApplyBeadStatusesResponse["results"] = [];
+			for (const c of changes) {
+				if (isBeadStatus(c.status)) valid.push({ id: c.id, status: c.status });
+				else invalid.push({ id: c.id, status: c.status, ok: false, error: `invalid status: ${c.status}` });
+			}
+			const applied = await applyBeadStatuses(nodeExec, valid, settings.beadsCommand, cwd);
+			const results = [...applied, ...invalid];
+			const ok = results.filter((r) => r.ok);
+			const lines: string[] = [];
+			if (ok.length) lines.push(`Updated ${ok.length} bead(s): ${ok.map((r) => `${r.id}->${r.status}`).join(", ")}`);
+			for (const r of results.filter((r) => !r.ok)) lines.push(`! ${r.id}: ${r.error ?? "failed"}`);
+			return { results, formattedText: lines.join("\n") };
 		},
 	});
 
@@ -570,6 +798,8 @@ async function main(): Promise<number> {
 			return await runSettingsSet(process.cwd(), parsed.location, parsed.key, parsed.value);
 		case "backups-list":
 			return await runBackupsList();
+		case "serve":
+			return await runServe(parsed.flags);
 		case "main":
 			return await runMain(parsed.targetTokens, parsed.flags);
 	}

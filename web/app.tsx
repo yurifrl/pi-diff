@@ -91,6 +91,81 @@ async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> {
 	return await response.json();
 }
 
+const BEAD_STATUS_OPTIONS = ["open", "in_progress", "blocked", "deferred", "closed"];
+
+type LinkedBead = { id: string; title: string; status: string };
+type ApplyBeadsResponse = { results: Array<{ id: string; status: string; ok: boolean; error?: string }>; formattedText: string };
+
+function BeadStatePanel({ viewerToken, beads }: { viewerToken: string; beads: LinkedBead[] }) {
+	const [draft, setDraft] = useState<Record<string, string>>({});
+	const [busy, setBusy] = useState(false);
+	const [message, setMessage] = useState<string | null>(null);
+	const [current, setCurrent] = useState<LinkedBead[]>(beads);
+	useEffect(() => { setCurrent(beads); }, [beads]);
+
+	if (current.length === 0) return null;
+
+	const pending = current.filter((b) => draft[b.id] && draft[b.id] !== b.status);
+
+	const apply = async () => {
+		if (pending.length === 0) return;
+		setBusy(true);
+		setMessage(null);
+		try {
+			const response = await fetchJson<ApplyBeadsResponse>(`/api/viewer/${viewerToken}/beads`, {
+				method: "POST",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({ changes: pending.map((b) => ({ id: b.id, status: draft[b.id] })) }),
+			});
+			setMessage(response.formattedText || "Done.");
+			setCurrent((prev) => prev.map((b) => {
+				const applied = response.results.find((r) => r.id === b.id && r.ok);
+				return applied ? { ...b, status: applied.status } : b;
+			}));
+			setDraft({});
+		} catch (error) {
+			setMessage(error instanceof Error ? error.message : "Failed to update beads.");
+		} finally {
+			setBusy(false);
+		}
+	};
+
+	return (
+		<section className="bead-panel" aria-label="Linked beads">
+			<h2 className="bead-panel__title">Linked beads ({current.length})</h2>
+			<ul className="bead-panel__list">
+				{current.map((bead) => {
+					const value = draft[bead.id] ?? bead.status;
+					const changed = value !== bead.status;
+					return (
+						<li className="bead-panel__item" key={bead.id}>
+							<code className="bead-panel__id">{bead.id}</code>
+							<span className="bead-panel__bead-title">{bead.title}</span>
+							<select
+								className="bead-panel__select"
+								value={value}
+								onChange={(event) => setDraft((d) => ({ ...d, [bead.id]: event.target.value }))}
+							>
+								{BEAD_STATUS_OPTIONS.includes(bead.status) ? null : <option value={bead.status}>{bead.status || "(unknown)"}</option>}
+								{BEAD_STATUS_OPTIONS.map((status) => (
+									<option key={status} value={status}>{status}</option>
+								))}
+							</select>
+							{changed ? <span className="bead-panel__changed">→ {value}</span> : null}
+						</li>
+					);
+				})}
+			</ul>
+			<div className="bead-panel__footer">
+				<button className="bead-panel__apply" disabled={busy || pending.length === 0} onClick={() => void apply()} type="button">
+					{busy ? "Applying…" : `Apply state changes${pending.length ? ` (${pending.length})` : ""}`}
+				</button>
+				{message ? <span className="bead-panel__message">{message}</span> : null}
+			</div>
+		</section>
+	);
+}
+
 export function App({ viewerToken }: AppProps) {
 	const initialStoredState = useMemo(() => loadViewerState(viewerToken), [viewerToken]);
 	const [bootstrap, setBootstrap] = useState<ViewerBootstrapPayload | null>(null);
@@ -848,6 +923,7 @@ export function App({ viewerToken }: AppProps) {
 							</div>
 						) : null}
 					</section>
+					<BeadStatePanel viewerToken={viewerToken} beads={bootstrap?.linkedBeads ?? []} />
 					{layoutMode === "deck" && files.length > 0 ? (
 						<section className="deck-progress" aria-label="Deck progress">
 							<div className="deck-progress__track">

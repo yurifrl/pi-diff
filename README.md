@@ -63,6 +63,8 @@ pi-diff uncommitted                  # working tree vs HEAD
 pi-diff branch main                  # merge-base of main vs HEAD
 pi-diff commit abc123                # commit vs its parent
 pi-diff commit abc123 --output beads # one-off override
+pi-diff serve                        # persistent server; later diffs become tabs
+pi-diff uncommitted --name "Fix" --bead bd-12  # register a PR tab on a running server
 ```
 
 The flow:
@@ -85,11 +87,38 @@ Failed beads stay in the queue with `(failed: …)` so you can `e` to fix and re
 
 | Flag | Values | Effect |
 |------|--------|--------|
+| `--name <title>` | | Title for the PR/tab (default: the target label) |
+| `--bead <id>` | | Link an existing bead; repeatable, or comma-list (`--bead bd-1,bd-2`) |
 | `--viewer` | `cmux`, `browser`, `none` | Where to open the URL |
 | `--output` | `prompt`, `beads`, `beads-script` | How comments are emitted |
 | `--cwd <path>` | | Run as if from `<path>` |
 | `--no-open` | | Print the URL only, don't open anything |
+| `--no-server` | | Ignore any running server; force single-shot |
 | `--auto-submit` | | Skip the manager TUI; first browser submit is processed and CLI exits |
+
+---
+
+## Pull-request / server mode
+
+Run one persistent server and let every later `pi-diff` show up as a **tab** in the same web page — like a list of open pull requests. Each tab is a diff with a title, optional linked beads, line comments, and a *Finish review* panel to change those beads' state.
+
+```bash
+pi-diff serve                        # start the server; keep it running (Ctrl+C to stop)
+# in any repo, any terminal:
+pi-diff uncommitted --name "Fix login" --bead bd-12 --bead bd-34
+pi-diff branch main  --name "Refactor parser"
+```
+
+- `pi-diff serve` starts a long-lived server, opens the multi-tab page, and records `{port,pid}` in `~/.pi/agent/pi-diff-server.json`.
+- A later `pi-diff <target> --name … --bead …` detects the running server, registers the diff as a new tab, and **exits immediately**. If no server is running it falls back to the normal single-shot flow (use `--no-server` to force that).
+- The **serve process owns output**: comment submissions are emitted from *its* stdout (`prompt`) or create beads (`beads`); linked-bead status changes (`open` / `in_progress` / `blocked` / `deferred` / `closed`) are applied by it via `bd update`.
+- `--bead` accepts one or more existing bead IDs. They appear in the viewer's *Linked beads* panel with a per-bead status dropdown; applying changes runs `bd update <id> --status <new>`.
+
+| Serve flag | Values | Effect |
+|------|--------|--------|
+| `--cwd <path>` | | Base directory for the server process |
+| `--viewer` | `cmux`, `browser`, `none` | How to open the multi-tab page on start |
+| `--no-open` | | Just print the URL; don't open anything |
 
 ---
 

@@ -40,8 +40,15 @@ export type DiffFilePayload = {
 	message?: string;
 };
 
+export type LinkedBead = {
+	id: string;
+	title: string;
+	status: string;
+};
+
 export type ViewerBootstrapPayload = {
 	viewerToken: string;
+	name: string;
 	repo: RepoMetadata;
 	target: ResolvedDiffTarget;
 	files: DiffFileEntry[];
@@ -49,8 +56,19 @@ export type ViewerBootstrapPayload = {
 	defaultLayoutMode: DiffLayoutMode;
 	beadsEnabled: boolean;
 	beadsConfigured: boolean;
+	linkedBeads: LinkedBead[];
 	buildVersion: string;       // e.g. "0.1.0" or "0.1.0-dev+abc1234"
 	buildKind: "release" | "dev";
+};
+
+export type BeadStatusChange = {
+	id: string;
+	status: string;
+};
+
+export type ApplyBeadStatusesResponse = {
+	results: Array<{ id: string; status: string; ok: boolean; error?: string }>;
+	formattedText: string;
 };
 
 export type ViewerSettingsResponse = {
@@ -106,12 +124,33 @@ export type DiffViewerData = {
 	filePayloads: Map<string, DiffFilePayload>;
 };
 
+export type RegisterDiffPayload = {
+	name?: string;
+	cwd: string;
+	repo: RepoMetadata;
+	target: ResolvedDiffTarget;
+	files: DiffFileEntry[];
+	filePayloads: Record<string, DiffFilePayload>;
+	beadIds: string[];
+};
+
+export type ViewerSessionSummary = {
+	token: string;
+	name: string;
+	url: string;
+	targetLabel: string;
+	createdAt: number;
+	linkedBeadCount: number;
+};
+
 export type ViewerSession = {
 	token: string;
+	createdAt: number;
 	bootstrap: ViewerBootstrapPayload;
 	refreshBootstrap?: () => Promise<ViewerBootstrapPayload>;
 	loadFile: (fileId: string) => Promise<DiffFilePayload | null>;
 	sendComments: (comments: DiffComment[]) => Promise<SendCommentsResponse>;
 	setBeadsEnabled?: (enabled: boolean) => Promise<ViewerSettingsResponse>;
+	applyBeadStatuses?: (changes: BeadStatusChange[]) => Promise<ApplyBeadStatusesResponse>;
 	markDone?: () => Promise<void> | void;
 };

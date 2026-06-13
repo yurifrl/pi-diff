@@ -143,6 +143,98 @@ export async function createBeadsForComments(
 	return out;
 }
 
+export const BEAD_STATUSES = ["open", "in_progress", "blocked", "deferred", "closed"] as const;
+export type BeadStatus = (typeof BEAD_STATUSES)[number];
+
+export function isBeadStatus(value: unknown): value is BeadStatus {
+	return typeof value === "string" && (BEAD_STATUSES as readonly string[]).includes(value);
+}
+
+export type LinkedBead = {
+	id: string;
+	title: string;
+	status: string;
+};
+
+/**
+ * Load metadata for the given bead IDs via `bd show <ids...> --json`. Missing
+ * IDs are reported by bd on stderr and simply omitted from the JSON array, so
+ * the result only contains beads that actually exist. Returns [] on any
+ * failure (beads not installed, repo not configured, etc.).
+ */
+export async function loadBeads(exec: Exec, ids: string[], command: string, cwd: string): Promise<LinkedBead[]> {
+	const unique = Array.from(new Set(ids.map((id) => id.trim()).filter(Boolean)));
+	if (unique.length === 0) return [];
+	let result;
+	try {
+		result = await exec(command, ["show", ...unique, "--json"], { cwd, timeout: 10000 });
+	} catch {
+		return [];
+	}
+	const raw = result.stdout.trim();
+	if (!raw) return [];
+	let parsed: unknown;
+	try {
+		parsed = JSON.parse(raw);
+	} catch {
+		return [];
+	}
+	const arr = Array.isArray(parsed) ? parsed : [parsed];
+	const out: LinkedBead[] = [];
+	for (const item of arr) {
+		if (typeof item !== "object" || item === null) continue;
+		const record = item as Record<string, unknown>;
+		const id = typeof record.id === "string" ? record.id : null;
+		if (!id) continue;
+		out.push({
+			id,
+			title: typeof record.title === "string" ? record.title : "",
+			status: typeof record.status === "string" ? record.status : "",
+		});
+	}
+	return out;
+}
+
+export type BeadStatusUpdate = {
+	id: string;
+	status: BeadStatus;
+	ok: boolean;
+	error?: string;
+};
+
+/** Apply a single status change via `bd update <id> --status <status>`. */
+export async function updateBeadStatus(
+	exec: Exec,
+	id: string,
+	status: BeadStatus,
+	command: string,
+	cwd: string,
+): Promise<BeadStatusUpdate> {
+	try {
+		const result = await exec(command, ["update", id, "--status", status], { cwd, timeout: 10000 });
+		if (result.code !== 0) {
+			return { id, status, ok: false, error: result.stderr.trim() || `exit ${result.code}` };
+		}
+		return { id, status, ok: true };
+	} catch (error) {
+		return { id, status, ok: false, error: error instanceof Error ? error.message : String(error) };
+	}
+}
+
+/** Apply many status changes sequentially (bd writes are not concurrency-safe). */
+export async function applyBeadStatuses(
+	exec: Exec,
+	updates: Array<{ id: string; status: BeadStatus }>,
+	command: string,
+	cwd: string,
+): Promise<BeadStatusUpdate[]> {
+	const out: BeadStatusUpdate[] = [];
+	for (const u of updates) {
+		out.push(await updateBeadStatus(exec, u.id, u.status, command, cwd));
+	}
+	return out;
+}
+
 export function summarizeCreated(results: CreatedBead[]): string {
 	const lines: string[] = [];
 	const ok = results.filter((r) => r.id);

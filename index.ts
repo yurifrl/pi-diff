@@ -105,6 +105,7 @@ async function runDiffCommand(exec: Exec, server: { instance: DiffServer | null 
 		let hasServedInitialBootstrap = false;
 
 		const computeBootstrap = () => ({
+			name: viewerData.target.label,
 			repo: viewerData.repo,
 			target: viewerData.target,
 			files: viewerData.files,
@@ -112,6 +113,7 @@ async function runDiffCommand(exec: Exec, server: { instance: DiffServer | null 
 			defaultLayoutMode: currentSettings.layoutMode,
 			beadsEnabled: isBeadsOutputMode(currentSettings.output),
 			beadsConfigured: isBeadsRepoConfigured(ctx.cwd),
+			linkedBeads: [],
 			buildVersion: getVersionInfo().display,
 			buildKind: getVersionInfo().buildKind,
 		});

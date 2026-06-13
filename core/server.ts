@@ -5,7 +5,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { validateDiffComments } from "./comments.js";
-import type { ViewerBootstrapPayload, ViewerSession } from "./types.js";
+import type { ApplyBeadStatusesResponse, BeadStatusChange, RegisterDiffPayload, ViewerBootstrapPayload, ViewerSession, ViewerSessionSummary } from "./types.js";
 
 const HOST = "127.0.0.1";
 const APP_JS_BASENAME = "app.js";
@@ -42,11 +42,18 @@ export type CreateViewerSessionInput = {
 	loadFile: ViewerSession["loadFile"];
 	sendComments: ViewerSession["sendComments"];
 	setBeadsEnabled?: ViewerSession["setBeadsEnabled"];
+	applyBeadStatuses?: ViewerSession["applyBeadStatuses"];
 	markDone?: ViewerSession["markDone"];
 };
 
 export type DiffServerOptions = {
 	buildAssets?: () => Promise<AssetManifest>;
+	/**
+	 * When provided, the server accepts `POST /api/register` and turns the
+	 * pushed diff payload into a viewer session. Supplied by the persistent
+	 * `pi-diff serve` process, which owns comment output and bead updates.
+	 */
+	onRegister?: (payload: RegisterDiffPayload) => Promise<CreateViewerSessionInput>;
 };
 
 function isValidViewerToken(value: string): boolean {
@@ -98,6 +105,23 @@ function renderHtmlShell(token: string): string {
 </html>`;
 }
 
+function renderShellPageHtml(): string {
+	return `<!doctype html>
+<html lang="en">
+<head>
+	<meta charset="utf-8" />
+	<meta name="viewport" content="width=device-width, initial-scale=1" />
+	<title>pi-diff</title>
+	<link rel="stylesheet" href="/assets/${APP_CSS_BASENAME}" />
+</head>
+<body>
+	<div id="root"></div>
+	<script>window.__PI_DIFF_SHELL__ = true;</script>
+	<script type="module" src="/assets/${APP_JS_BASENAME}"></script>
+</body>
+</html>`;
+}
+
 function json(response: ServerResponse, statusCode: number, value: unknown) {
 	response.statusCode = statusCode;
 	response.setHeader("Content-Type", "application/json; charset=utf-8");
@@ -116,9 +140,44 @@ async function readJsonRequestBody(request: IncomingMessage): Promise<unknown> {
 	return JSON.parse(rawBody);
 }
 
+function parseRegisterPayload(body: unknown): RegisterDiffPayload {
+	if (typeof body !== "object" || body === null) throw new Error("Registration payload must be an object.");
+	const b = body as Record<string, unknown>;
+	if (typeof b.cwd !== "string" || !b.cwd) throw new Error("`cwd` is required.");
+	if (typeof b.repo !== "object" || b.repo === null) throw new Error("`repo` is required.");
+	if (typeof b.target !== "object" || b.target === null) throw new Error("`target` is required.");
+	if (!Array.isArray(b.files)) throw new Error("`files` must be an array.");
+	if (typeof b.filePayloads !== "object" || b.filePayloads === null) throw new Error("`filePayloads` is required.");
+	const beadIds = Array.isArray(b.beadIds) ? b.beadIds.filter((x): x is string => typeof x === "string") : [];
+	return {
+		name: typeof b.name === "string" ? b.name : undefined,
+		cwd: b.cwd,
+		repo: b.repo as RegisterDiffPayload["repo"],
+		target: b.target as RegisterDiffPayload["target"],
+		files: b.files as RegisterDiffPayload["files"],
+		filePayloads: b.filePayloads as RegisterDiffPayload["filePayloads"],
+		beadIds,
+	};
+}
+
+function parseBeadStatusChanges(body: unknown): BeadStatusChange[] {
+	const raw = typeof body === "object" && body !== null && "changes" in body ? (body as { changes?: unknown }).changes : undefined;
+	if (!Array.isArray(raw)) throw new Error("`changes` must be an array.");
+	const out: BeadStatusChange[] = [];
+	for (const item of raw) {
+		if (typeof item !== "object" || item === null) throw new Error("Each change must be an object.");
+		const rec = item as Record<string, unknown>;
+		if (typeof rec.id !== "string" || !rec.id) throw new Error("Each change requires a string `id`.");
+		if (typeof rec.status !== "string" || !rec.status) throw new Error("Each change requires a string `status`.");
+		out.push({ id: rec.id, status: rec.status });
+	}
+	return out;
+}
+
 export class DiffServer {
 	private readonly sessions = new Map<string, ViewerSession>();
 	private readonly buildAssets: () => Promise<AssetManifest>;
+	private readonly onRegister?: (payload: RegisterDiffPayload) => Promise<CreateViewerSessionInput>;
 	private readonly server = createServer(this.handleRequest.bind(this));
 	private startPromise: Promise<void> | null = null;
 	private stopped = false;
@@ -126,6 +185,7 @@ export class DiffServer {
 
 	constructor(options: DiffServerOptions = {}) {
 		this.buildAssets = options.buildAssets ?? ensureViewerAssetsBuilt;
+		this.onRegister = options.onRegister;
 	}
 
 	async start(): Promise<void> {
@@ -180,6 +240,7 @@ export class DiffServer {
 		const token = randomUUID();
 		this.sessions.set(token, {
 			token,
+			createdAt: Date.now(),
 			bootstrap: {
 				...input.bootstrap,
 				viewerToken: token,
@@ -193,6 +254,7 @@ export class DiffServer {
 			loadFile: input.loadFile,
 			sendComments: input.sendComments,
 			setBeadsEnabled: input.setBeadsEnabled,
+			applyBeadStatuses: input.applyBeadStatuses,
 			markDone: input.markDone,
 		});
 		return {
@@ -201,11 +263,31 @@ export class DiffServer {
 		};
 	}
 
+	getSessionSummaries(): ViewerSessionSummary[] {
+		return Array.from(this.sessions.values())
+			.sort((a, b) => a.createdAt - b.createdAt)
+			.map((session) => ({
+				token: session.token,
+				name: session.bootstrap.name || session.bootstrap.target.label,
+				url: this.getViewerUrl(session.token),
+				targetLabel: session.bootstrap.target.label,
+				createdAt: session.createdAt,
+				linkedBeadCount: session.bootstrap.linkedBeads.length,
+			}));
+	}
+
 	getViewerUrl(token: string): string {
 		if (this.port === null) {
 			throw new Error("The diff viewer server has not started yet.");
 		}
 		return `http://${HOST}:${this.port}/viewer/${token}`;
+	}
+
+	getPort(): number {
+		if (this.port === null) {
+			throw new Error("The diff viewer server has not started yet.");
+		}
+		return this.port;
 	}
 
 	private async serveAsset(response: ServerResponse, assetPath: string, contentType: string) {
@@ -239,6 +321,37 @@ export class DiffServer {
 			if (pathname === `/assets/${APP_CSS_BASENAME}`) {
 				const assets = await this.buildAssets();
 				await this.serveAsset(response, assets.cssPath, "text/css");
+				return;
+			}
+
+			if (pathname === "/" || pathname === "/index.html") {
+				response.statusCode = 200;
+				response.setHeader("Content-Type", "text/html; charset=utf-8");
+				response.end(renderShellPageHtml());
+				return;
+			}
+
+			if (pathname === "/api/sessions" && request.method === "GET") {
+				json(response, 200, { sessions: this.getSessionSummaries() });
+				return;
+			}
+
+			if (pathname === "/api/register" && request.method === "POST") {
+				if (!this.onRegister) {
+					json(response, 400, { error: "This server does not accept registrations." });
+					return;
+				}
+				const body = await readJsonRequestBody(request);
+				let payload: RegisterDiffPayload;
+				try {
+					payload = parseRegisterPayload(body);
+				} catch (error) {
+					json(response, 400, { error: error instanceof Error ? error.message : "Invalid registration payload." });
+					return;
+				}
+				const input = await this.onRegister(payload);
+				const session = await this.createViewerSession(input);
+				json(response, 200, { token: session.token, url: session.url });
 				return;
 			}
 
@@ -342,6 +455,38 @@ export class DiffServer {
 					try { await session.markDone(); } catch { /* ignore */ }
 				}
 				json(response, 200, { ok: true });
+				return;
+			}
+
+			const beadsMatch = pathname.match(/^\/api\/viewer\/([^/]+)\/beads$/);
+			if (beadsMatch && request.method === "POST") {
+				const token = beadsMatch[1] ?? "";
+				if (!isValidViewerToken(token)) {
+					json(response, 400, { error: "Invalid viewer token." });
+					return;
+				}
+				const session = this.sessions.get(token);
+				if (!session) {
+					json(response, 404, { error: "Viewer session expired." });
+					return;
+				}
+				if (!session.applyBeadStatuses) {
+					json(response, 400, { error: "Bead status updates are not supported for this session." });
+					return;
+				}
+				const body = await readJsonRequestBody(request);
+				let changes: BeadStatusChange[];
+				try {
+					changes = parseBeadStatusChanges(body);
+				} catch (error) {
+					json(response, 400, { error: error instanceof Error ? error.message : "Invalid bead changes." });
+					return;
+				}
+				const result = await session.applyBeadStatuses(changes);
+				if (session.refreshBootstrap) {
+					try { session.bootstrap = await session.refreshBootstrap(); } catch { /* ignore */ }
+				}
+				json(response, 200, result);
 				return;
 			}
 
